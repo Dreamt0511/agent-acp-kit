@@ -621,6 +621,51 @@ describe("buildCodexLaunchPlan", () => {
     }
   });
 
+  it("can skip writing the Codex project root marker file", async () => {
+    const sourceHome = await mkdtemp(join(tmpdir(), "codex-source-home-"));
+    const cwd = await mkdtemp(join(tmpdir(), "codex-provider-plan-"));
+    let runHome: string | undefined;
+
+    try {
+      await writeFile(
+        join(sourceHome, "auth.json"),
+        JSON.stringify({ OPENAI_API_KEY: "test-key" }),
+        "utf8",
+      );
+      await writeFile(
+        join(sourceHome, "config.toml"),
+        [
+          'model_provider = "OpenAI"',
+          'project_root_markers = [".vibe-workspace", ".git"]',
+          "",
+        ].join("\n"),
+        "utf8",
+      );
+
+      const adapter = createCodexProvider().createAdapter();
+      const plan = await adapter!.buildLaunchPlan({
+        runId: "run-skip-project-root-marker",
+        cwd,
+        prompt: "edit a single file artifact",
+        env: { CODEX_HOME: sourceHome },
+        writeCodexProjectRootMarker: false,
+      });
+      runHome = plan.env?.CODEX_HOME;
+
+      const config = await readFile(join(runHome!, "config.toml"), "utf8");
+      expect(config).toContain("project_root_markers = []");
+      expect(config).not.toContain(".agent-acp-kit-codex-root");
+      await expect(access(join(cwd, ".agent-acp-kit-codex-root"))).rejects.toThrow();
+      runHome = undefined;
+    } finally {
+      await rm(sourceHome, { recursive: true, force: true });
+      await rm(cwd, { recursive: true, force: true });
+      if (runHome) {
+        await rm(runHome, { recursive: true, force: true });
+      }
+    }
+  });
+
   it("rejects duplicate Codex preparation and cleans only the adapter run home", async () => {
     const scratch = await mkdtemp(join(tmpdir(), "codex-duplicate-run-"));
     const sourceHome = join(scratch, "source-home");

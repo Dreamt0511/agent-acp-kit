@@ -512,7 +512,15 @@ function mergeCodexProjectRootMarkers(values: string[]) {
   return next;
 }
 
-function ensureCodexProjectRootMarkers(content: string) {
+function resolveCodexProjectRootMarkers(
+  values: string[],
+  writeMarkerFile: boolean,
+): string[] {
+  if (!writeMarkerFile) return [];
+  return mergeCodexProjectRootMarkers(values);
+}
+
+function ensureCodexProjectRootMarkers(content: string, writeMarkerFile = true) {
   const lines = content.split(/\r?\n/);
   const out: string[] = [];
   let inserted = false;
@@ -523,7 +531,9 @@ function ensureCodexProjectRootMarkers(content: string) {
     if (trimmed.startsWith("[")) {
       if (!inserted) {
         out.push(
-          `project_root_markers = ${formatTomlStringArray(mergeCodexProjectRootMarkers([]))}`,
+          `project_root_markers = ${formatTomlStringArray(
+            resolveCodexProjectRootMarkers([], writeMarkerFile),
+          )}`,
           "",
         );
         inserted = true;
@@ -536,7 +546,7 @@ function ensureCodexProjectRootMarkers(content: string) {
     if (currentTable === "" && rootProjectRootMarkersRe.test(line)) {
       out.push(
         `project_root_markers = ${formatTomlStringArray(
-          mergeCodexProjectRootMarkers(readTomlStringArray(line)),
+          resolveCodexProjectRootMarkers(readTomlStringArray(line), writeMarkerFile),
         )}`,
       );
       inserted = true;
@@ -548,7 +558,9 @@ function ensureCodexProjectRootMarkers(content: string) {
 
   if (!inserted) {
     out.unshift(
-      `project_root_markers = ${formatTomlStringArray(mergeCodexProjectRootMarkers([]))}`,
+      `project_root_markers = ${formatTomlStringArray(
+        resolveCodexProjectRootMarkers([], writeMarkerFile),
+      )}`,
       "",
     );
   }
@@ -631,6 +643,7 @@ async function materializeCodexHome(params: {
   env?: Record<string, string>;
   model?: string;
   runHome: string;
+  writeProjectRootMarker?: boolean;
 }) {
   const normalizedServers = normalizeMcpServerConfigs(params.mcpServers ?? []);
   const sourceHome =
@@ -670,9 +683,13 @@ async function materializeCodexHome(params: {
     ...(params.model ? { model: params.model } : {}),
     mcpServers: normalizedServers,
   });
+  const writeProjectRootMarker = params.writeProjectRootMarker !== false;
   await writeFile(
     join(runHome, "config.toml"),
-    ensureCodexProjectRootMarkers(ensureCodexMultiAgentDisabled(mergedConfig)),
+    ensureCodexProjectRootMarkers(
+      ensureCodexMultiAgentDisabled(mergedConfig),
+      writeProjectRootMarker,
+    ),
     "utf8",
   );
 
@@ -712,6 +729,7 @@ function createCodexCompatibleProvider<TProvider extends string>(
       const codexHome = await workspace.getRoot();
       const providerTemp = join(codexHome, "tmp");
       await mkdir(providerTemp, { recursive: true });
+      const writeProjectRootMarker = params.writeCodexProjectRootMarker !== false;
       const homePromise = materializeCodexHome({
         defaultHomeDirName: options.defaultHomeDirName,
         displayName: options.displayName,
@@ -720,6 +738,7 @@ function createCodexCompatibleProvider<TProvider extends string>(
         ...(params.mcpServers ? { mcpServers: params.mcpServers } : {}),
         ...(normalizedModel ? { model: normalizedModel } : {}),
         runHome: codexHome,
+        writeProjectRootMarker,
       });
       const skillsPromise = materializeSkillsIntoRoot(
         join(codexHome, "skills"),
@@ -732,7 +751,9 @@ function createCodexCompatibleProvider<TProvider extends string>(
       if (homeResult.status === "rejected") throw homeResult.reason;
       if (skillsResult.status === "rejected") throw skillsResult.reason;
       const materialized = skillsResult.value;
-      await ensureCodexProjectRootMarker(params.cwd);
+      if (writeProjectRootMarker) {
+        await ensureCodexProjectRootMarker(params.cwd);
+      }
       const prompt = buildCodexPrompt({
         prompt: params.prompt,
         ...(params.history ? { history: params.history } : {}),

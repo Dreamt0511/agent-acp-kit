@@ -339,6 +339,9 @@ for await (const event of runtime.run({
   mcpServers,
   skillManifest,
   extraAllowedDirs: [workspaceDir],
+  // Codex-only: set false to skip writing `.agent-acp-kit-codex-root` into cwd
+  // (uses `project_root_markers = []` so cwd is still treated as the project root).
+  writeCodexProjectRootMarker: true,
   env: providerEnv,
   resume: resumeContext,
 })) {

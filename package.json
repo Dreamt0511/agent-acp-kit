@@ -58,5 +58,13 @@
     "test:packed-consumer": "pnpm build && node scripts/test-packed-consumer.mjs",
     "test": "vitest run tests",
     "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "pnpm": {
+    "overrides": {
+      "hono": ">=4.12.34",
+      "ip-address": ">=10.2.2",
+      "@hono/node-server": ">=2.0.5",
+      "fast-uri": ">=3.1.5"
+    }
   }
 }

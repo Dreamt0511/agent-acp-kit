@@ -28,6 +28,12 @@ export type AgentRunInput<
   reasoning?: string;
   permission?: AgentPermissionSelection;
   extraAllowedDirs?: string[];
+  /**
+   * Codex-only. When `false`, do not write `.agent-acp-kit-codex-root` into `cwd`
+   * and set Codex `project_root_markers = []` so `cwd` is treated as the project root
+   * without a user-visible marker file. Default: `true`.
+   */
+  writeCodexProjectRootMarker?: boolean;
   metadata?: Record<string, unknown>;
   resume?: {
     mode: "native" | "provider" | "fresh";

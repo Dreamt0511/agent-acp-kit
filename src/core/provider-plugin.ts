@@ -99,6 +99,12 @@ export type AgentRunParams<TKind extends string = string, TProvider extends stri
   runtimeKind?: TKind;
   runtimeProvider?: TProvider;
   extraAllowedDirs?: string[];
+  /**
+   * Codex-only. When `false`, do not write `.agent-acp-kit-codex-root` into `cwd`
+   * and set Codex `project_root_markers = []` so `cwd` is treated as the project root
+   * without a user-visible marker file. Default: `true`.
+   */
+  writeCodexProjectRootMarker?: boolean;
   mcpServers?: LocalAgentMcpServerConfig[];
   signal?: AbortSignal;
   skillManifest?: SkillMaterializationRecord[];

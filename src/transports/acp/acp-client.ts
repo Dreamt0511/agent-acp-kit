@@ -1,5 +1,9 @@
 import type { AgentEvent } from "../../core/events.js";
-import type { AgentRunParams, ProviderLaunchPlan } from "../../core/provider-plugin.js";
+import type {
+  AgentRunParams,
+  ProviderLaunchPlan,
+} from "../../core/provider-plugin.js";
+import { terminateProcessTree } from "../../process/cancellation.js";
 import { spawnSupervisedProcess } from "../../process/supervisor.js";
 import { createJsonRpcLineParser, sendJsonRpc } from "./acp-jsonrpc.js";
 import { choosePermissionOutcome } from "./acp-permissions.js";
@@ -39,7 +43,7 @@ function pushSessionUpdateEvents(
   activeToolCalls: Map<string, AcpToolCallState>,
 ) {
   const payload = (params ?? {}) as Record<string, unknown>;
-  const update = ((payload.update ?? payload.event ?? payload) ?? {}) as Record<
+  const update = (payload.update ?? payload.event ?? payload ?? {}) as Record<
     string,
     unknown
   >;
@@ -55,10 +59,12 @@ function pushSessionUpdateEvents(
         ? update.delta
         : typeof update.content === "string"
           ? update.content
-          : content && typeof content === "object" && !Array.isArray(content) &&
+          : content &&
+              typeof content === "object" &&
+              !Array.isArray(content) &&
               typeof (content as Record<string, unknown>).text === "string"
             ? String((content as Record<string, unknown>).text)
-          : undefined;
+            : undefined;
   if (text && kind === "agent_thought_chunk") {
     queue.push({ type: "thinking", text });
     return;
@@ -72,18 +78,17 @@ function pushSessionUpdateEvents(
     return;
   }
 
-  const toolCall =
-    (update.toolCall ?? update.tool_call ?? update.call) as
-      | Record<string, unknown>
-      | undefined;
-  const toolResult =
-    (update.toolResult ?? update.tool_result ?? update.result) as
-      | Record<string, unknown>
-      | undefined;
+  const toolCall = (update.toolCall ?? update.tool_call ?? update.call) as
+    | Record<string, unknown>
+    | undefined;
+  const toolResult = (update.toolResult ??
+    update.tool_result ??
+    update.result) as Record<string, unknown> | undefined;
   const updateStatus = String(update.status ?? "");
   const isStandardToolUpdate = kind === "tool_call_update";
   const isTerminalToolUpdate =
-    isStandardToolUpdate && /completed|failed|cancelled|canceled|error/i.test(updateStatus);
+    isStandardToolUpdate &&
+    /completed|failed|cancelled|canceled|error/i.test(updateStatus);
   if (
     toolResult ||
     isTerminalToolUpdate ||
@@ -104,7 +109,7 @@ function pushSessionUpdateEvents(
       id,
       ...(previous?.name
         ? { name: previous.name }
-        : source.name ?? source.toolName ?? source.kind
+        : (source.name ?? source.toolName ?? source.kind)
           ? { name: toolCallName(source) }
           : {}),
       ...(previous?.rawName
@@ -146,7 +151,7 @@ function pushSessionUpdateEvents(
         ? { mcpServerName: source.mcpServerName }
         : previous?.mcpServerName
           ? { mcpServerName: previous.mcpServerName }
-        : {}),
+          : {}),
     };
     if (!activeToolCalls.has(id)) {
       queue.push({
@@ -170,12 +175,11 @@ function pushSessionUpdateEvents(
   }
 
   if (/done|complete|finished|cancel|fail|error/i.test(kind)) {
-    const status =
-      /cancel/i.test(kind)
-        ? "canceled"
-        : /fail|error/i.test(kind)
-          ? "failed"
-          : "completed";
+    const status = /cancel/i.test(kind)
+      ? "canceled"
+      : /fail|error/i.test(kind)
+        ? "failed"
+        : "completed";
     queue.push({
       type: "done",
       status,
@@ -185,7 +189,9 @@ function pushSessionUpdateEvents(
           : status === "failed"
             ? "error"
             : "completed",
-      ...(typeof update.sessionId === "string" ? { sessionId: update.sessionId } : {}),
+      ...(typeof update.sessionId === "string"
+        ? { sessionId: update.sessionId }
+        : {}),
       ...(typeof update.resumeToken === "string"
         ? { resumeToken: update.resumeToken }
         : {}),
@@ -277,7 +283,8 @@ export async function* runAcpTransport(
   function captureSessionMetadata(result: unknown) {
     if (!result || typeof result !== "object") return;
     const record = result as Record<string, unknown>;
-    const candidateSessionId = record.sessionId ?? record.session_id ?? record.id;
+    const candidateSessionId =
+      record.sessionId ?? record.session_id ?? record.id;
     if (typeof candidateSessionId === "string") {
       sessionId = candidateSessionId;
     }
@@ -354,64 +361,66 @@ export async function* runAcpTransport(
         message,
       });
       failPending(new Error(message));
-      processHandle.child.kill();
+      terminateProcessTree(processHandle.child, "SIGTERM");
     }
   });
   processHandle.child.stderr.on("data", (chunk: string) => {
     queue.push({ type: "stderr", text: processHandle.stderr.redact(chunk) });
   });
 
-  const waitForExit = processHandle.waitForExit().then(({ code, signal, timedOut }) => {
-    if (promptExitTimer) clearTimeout(promptExitTimer);
-    if (promptKillFallbackTimer) clearTimeout(promptKillFallbackTimer);
-    const completedByClientShutdown =
-      promptCompleted &&
-      transportClosedProcess &&
-      !params.signal?.aborted &&
-      !timedOut &&
-      (signal != null || code === 143 || code === 137);
-    if (pending.size > 0) {
-      failPending(
-        new Error(
-          code && code !== 0
-            ? `ACP process exited with code ${code} before lifecycle completed.`
-            : "ACP process exited before lifecycle completed.",
-        ),
-      );
-    }
+  const waitForExit = processHandle
+    .waitForExit()
+    .then(({ code, signal, timedOut }) => {
+      if (promptExitTimer) clearTimeout(promptExitTimer);
+      if (promptKillFallbackTimer) clearTimeout(promptKillFallbackTimer);
+      const completedByClientShutdown =
+        promptCompleted &&
+        transportClosedProcess &&
+        !params.signal?.aborted &&
+        !timedOut &&
+        (signal != null || code === 143 || code === 137);
+      if (pending.size > 0) {
+        failPending(
+          new Error(
+            code && code !== 0
+              ? `ACP process exited with code ${code} before lifecycle completed.`
+              : "ACP process exited before lifecycle completed.",
+          ),
+        );
+      }
 
-    if (timedOut) {
+      if (timedOut) {
+        queue.push({
+          type: "error",
+          code: "process_timeout",
+          message: `ACP process timed out after ${plan.timeoutMs}ms.`,
+        });
+      } else if (code && code !== 0 && !completedByClientShutdown) {
+        const stderrTail = processHandle.stderr.tail().trim();
+        queue.push({
+          type: "error",
+          code: "process_exit_nonzero",
+          message:
+            stderrTail.length > 0
+              ? stderrTail
+              : `ACP process exited with code ${code}.`,
+        });
+      }
+      const failed =
+        fatalError ||
+        timedOut ||
+        (!completedByClientShutdown && code != null && code !== 0);
+      const canceled = signal != null && !failed && !completedByClientShutdown;
       queue.push({
-        type: "error",
-        code: "process_timeout",
-        message: `ACP process timed out after ${plan.timeoutMs}ms.`,
+        type: "done",
+        status: canceled ? "canceled" : failed ? "failed" : "completed",
+        reason: canceled ? "cancelled" : failed ? "error" : "completed",
+        exitCode: completedByClientShutdown ? 0 : code,
+        ...(sessionId ? { sessionId } : {}),
+        ...(resumeToken ? { resumeToken } : {}),
       });
-    } else if (code && code !== 0 && !completedByClientShutdown) {
-      const stderrTail = processHandle.stderr.tail().trim();
-      queue.push({
-        type: "error",
-        code: "process_exit_nonzero",
-        message:
-          stderrTail.length > 0
-            ? stderrTail
-            : `ACP process exited with code ${code}.`,
-      });
-    }
-    const failed =
-      fatalError ||
-      timedOut ||
-      (!completedByClientShutdown && code != null && code !== 0);
-    const canceled = signal != null && !failed && !completedByClientShutdown;
-    queue.push({
-      type: "done",
-      status: canceled ? "canceled" : failed ? "failed" : "completed",
-      reason: canceled ? "cancelled" : failed ? "error" : "completed",
-      exitCode: completedByClientShutdown ? 0 : code,
-      ...(sessionId ? { sessionId } : {}),
-      ...(resumeToken ? { resumeToken } : {}),
+      done = true;
     });
-    done = true;
-  });
 
   const runLifecycle = async () => {
     try {
@@ -471,13 +480,13 @@ export async function* runAcpTransport(
           processHandle.child.signalCode === null
         ) {
           transportClosedProcess = true;
-          processHandle.child.kill("SIGTERM");
+          terminateProcessTree(processHandle.child, "SIGTERM");
           promptKillFallbackTimer = setTimeout(() => {
             if (
               processHandle.child.exitCode === null &&
               processHandle.child.signalCode === null
             ) {
-              processHandle.child.kill("SIGKILL");
+              terminateProcessTree(processHandle.child, "SIGKILL");
             }
           }, 2_000);
         }
@@ -487,9 +496,10 @@ export async function* runAcpTransport(
       queue.push({
         type: "error",
         code: "acp_lifecycle_failed",
-        message: error instanceof Error ? error.message : "ACP lifecycle failed.",
+        message:
+          error instanceof Error ? error.message : "ACP lifecycle failed.",
       });
-      processHandle.child.kill();
+      terminateProcessTree(processHandle.child, "SIGTERM");
     } finally {
       lifecycleSettled = true;
     }

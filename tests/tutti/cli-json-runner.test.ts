@@ -3,7 +3,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { hasConfiguredTuttiCli, runTuttiCliJson } from "../../src/tutti/cli-json-runner.js";
+import {
+  hasConfiguredTuttiCli,
+  resolveTuttiCliInvocation,
+  runTuttiCliJson,
+} from "../../src/tutti/cli-json-runner.js";
 import {
   projectTuttiCliChildProcess,
   redactTuttiCliChildProcessText,
@@ -15,6 +19,18 @@ async function executable(source: string) {
   const dir = await mkdtemp(join(tmpdir(), "agent-acp-kit-tutti-cli-"));
   cleanup.push(dir);
   const file = join(dir, "tutti-test");
+  if (process.platform === "win32") {
+    // Windows cannot spawn shebang scripts directly; wrap the script in a
+    // .cmd shim so tests exercise the real batch-shim execution path.
+    const cmd = `${file}.cmd`;
+    await writeFile(
+      cmd,
+      `@echo off\r\n"${process.execPath}" "${file}" %*\r\n`,
+      "utf8",
+    );
+    await writeFile(file, `#!/usr/bin/env node\n${source}\n`, "utf8");
+    return cmd;
+  }
   await writeFile(file, `#!/usr/bin/env node\n${source}\n`, "utf8");
   await chmod(file, 0o755);
   return file;
@@ -22,7 +38,9 @@ async function executable(source: string) {
 
 afterEach(async () => {
   vi.unstubAllEnvs();
-  await Promise.all(cleanup.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
+  await Promise.all(
+    cleanup.splice(0).map((dir) => rm(dir, { recursive: true, force: true })),
+  );
 });
 
 describe("runTuttiCliJson", () => {
@@ -60,7 +78,9 @@ describe("runTuttiCliJson", () => {
       base: "base",
       appData: "/workspace/.tsh/apps/data/example",
     });
-    expect(baseEnv.TUTTI_APP_DATA_DIR).toBe("/workspace/.tsh/apps/data/example");
+    expect(baseEnv.TUTTI_APP_DATA_DIR).toBe(
+      "/workspace/.tsh/apps/data/example",
+    );
   });
 
   it("does not rehydrate ambient host env over an explicit direct-mode env", async () => {
@@ -91,17 +111,26 @@ describe("runTuttiCliJson", () => {
     });
 
     expect(projection.env).toEqual({ BASE_VALUE: "base" });
-    expect(projection.redactionSecrets).toEqual(["existing-secret", "request-secret"]);
+    expect(projection.redactionSecrets).toEqual([
+      "existing-secret",
+      "request-secret",
+    ]);
     expect(Object.isFrozen(projection)).toBe(true);
     expect(Object.isFrozen(projection.env)).toBe(true);
     expect(Object.isFrozen(projection.redactionSecrets)).toBe(true);
     expect(baseEnv).toEqual({ BASE_VALUE: "base" });
     expect(
-      redactTuttiCliChildProcessText("credential=request-secret", projection.redactionSecrets),
+      redactTuttiCliChildProcessText(
+        "credential=request-secret",
+        projection.redactionSecrets,
+      ),
     ).toBe("credential=[REDACTED]");
-    expect(redactTuttiCliChildProcessText("token-long-secret", ["secret", "long-secret"])).toBe(
-      "token-[REDACTED]",
-    );
+    expect(
+      redactTuttiCliChildProcessText("token-long-secret", [
+        "secret",
+        "long-secret",
+      ]),
+    ).toBe("token-[REDACTED]");
   });
 
   it("classifies timeout and abort without exposing configured secrets", async () => {
@@ -150,7 +179,9 @@ describe("runTuttiCliJson", () => {
     const command = await executable(
       `process.stderr.write("app-cli returned 502\\n"); process.exit(1);`,
     );
-    const error = await runTuttiCliJson({ command, args: [] }).catch((candidate) => candidate);
+    const error = await runTuttiCliJson({ command, args: [] }).catch(
+      (candidate) => candidate,
+    );
 
     expect(error).toMatchObject({
       code: "cli_execution_failed",
@@ -201,6 +232,70 @@ describe("runTuttiCliJson", () => {
     expect(JSON.stringify(error)).not.toContain(credential);
   });
 
+  it("fails closed for an unknown Windows batch shim", () => {
+    expect(() =>
+      resolveTuttiCliInvocation(
+        "C:\\Program Files\\Tutti\\state\\bin\\tutti.cmd",
+        ["--agent-id", "my agent id", "--model", "a&b%c"],
+        "win32",
+      ),
+    ).toThrow("Unsupported Windows batch shim");
+  });
+
+  it("resolves a Windows .cmd shim to its real executable when parseable", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "agent-acp-kit-tutti-shim-"));
+    cleanup.push(dir);
+    const shim = join(dir, "tutti.cmd");
+    const target = join(dir, "tutti-dev.exe");
+    await writeFile(shim, `@echo off\r\n"${target}" %*\r\n`, "utf8");
+    await writeFile(target, "placeholder", "utf8");
+    await chmod(shim, 0o755);
+    await chmod(target, 0o755);
+
+    expect(
+      resolveTuttiCliInvocation(shim, ["--json", "agent", "list"], "win32"),
+    ).toMatchObject({
+      command: target,
+      args: ["--json", "agent", "list"],
+    });
+  });
+
+  it("matches Windows batch shims case-insensitively", () => {
+    expect(() => resolveTuttiCliInvocation("TUTTI.CMD", [], "win32")).toThrow(
+      "Unsupported Windows batch shim",
+    );
+  });
+
+  it("keeps a native Windows executable as a direct invocation", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "agent-acp-kit-tutti-native-"));
+    cleanup.push(dir);
+    const target = join(dir, "tutti.exe");
+    await writeFile(target, "placeholder", "utf8");
+    await chmod(target, 0o755);
+    expect(
+      resolveTuttiCliInvocation(target, ["--json"], "win32"),
+    ).toMatchObject({
+      command: target,
+      args: ["--json"],
+    });
+  });
+
+  it("keeps a native non-Windows executable as a direct invocation", async () => {
+    const command = await executable("process.exit(0);");
+    expect(
+      resolveTuttiCliInvocation(command, ["--json", "agent", "list"], "darwin"),
+    ).toMatchObject({ command, args: ["--json", "agent", "list"] });
+  });
+
+  it("executes a supported Windows shim safely and a plain script elsewhere", async () => {
+    const command = await executable(
+      `process.stdout.write(JSON.stringify({ argv: process.argv.slice(2) }));`,
+    );
+    await expect(
+      runTuttiCliJson({ command, args: ["--json", "agent", "list"] }),
+    ).resolves.toEqual({ argv: ["--json", "agent", "list"] });
+  });
+
   it("classifies malformed JSON", async () => {
     const command = await executable(`process.stdout.write("not-json");`);
     await expect(runTuttiCliJson({ command, args: [] })).rejects.toMatchObject({
@@ -210,7 +305,9 @@ describe("runTuttiCliJson", () => {
 
   it("does not expose credential text from malformed CLI output", async () => {
     const credential = "request-secret-malformed-json";
-    const command = await executable(`process.stdout.write(${JSON.stringify(credential)});`);
+    const command = await executable(
+      `process.stdout.write(${JSON.stringify(credential)});`,
+    );
     const error = await runTuttiCliJson({
       command,
       args: [],

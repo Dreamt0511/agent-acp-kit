@@ -6,6 +6,23 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { detectCodex } from "../../src/providers/codex/detect.js";
 
+function writeNodeCommand(dir: string, name: string, source: string) {
+  if (process.platform === "win32") {
+    const scriptPath = join(dir, `${name}.js`);
+    const commandPath = join(dir, `${name}.cmd`);
+    writeFileSync(scriptPath, source);
+    writeFileSync(
+      commandPath,
+      `@"${process.execPath}" "${scriptPath}" %*\r\n`,
+    );
+    return commandPath;
+  }
+  const commandPath = join(dir, name);
+  writeFileSync(commandPath, `#!${process.execPath}\n${source}`);
+  chmodSync(commandPath, 0o755);
+  return commandPath;
+}
+
 describe("detectCodex", () => {
   const tempDirs: string[] = [];
 
@@ -49,12 +66,12 @@ describe("detectCodex", () => {
   it("returns config and skills directories from CODEX_HOME", async () => {
     const dir = mkdtempSync(join(tmpdir(), "agent-acp-kit-codex-detect-"));
     tempDirs.push(dir);
-    const codexBin = join(dir, "codex");
-    writeFileSync(
-      codexBin,
-      "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo \"codex 1.2.3\"; exit 0; fi\nexit 1\n",
+    const codexBin = writeNodeCommand(
+      dir,
+      "codex",
+      `if (process.argv[2] === "--version") { console.log("codex 1.2.3"); process.exit(0); }
+process.exit(1);`,
     );
-    chmodSync(codexBin, 0o755);
 
     const detection = await detectCodex({
       env: { PATH: dir, CODEX_HOME: join(dir, ".codex-home") },
@@ -72,12 +89,13 @@ describe("detectCodex", () => {
   it("supports the Tutti Agent command and TUTTI_AGENT_HOME", async () => {
     const dir = mkdtempSync(join(tmpdir(), "agent-acp-kit-tutti-agent-detect-"));
     tempDirs.push(dir);
-    const tuttiAgentBin = join(dir, "tutti-agent");
-    writeFileSync(
-      tuttiAgentBin,
-      "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo \"tutti-agent 0.0.1\"; exit 0; fi\nif [ \"$1\" = \"login\" ] && [ \"$2\" = \"status\" ]; then echo \"Not logged in\"; exit 1; fi\nexit 1\n",
+    const tuttiAgentBin = writeNodeCommand(
+      dir,
+      "tutti-agent",
+      `if (process.argv[2] === "--version") { console.log("tutti-agent 0.0.1"); process.exit(0); }
+if (process.argv[2] === "login" && process.argv[3] === "status") { console.log("Not logged in"); process.exit(1); }
+process.exit(1);`,
     );
-    chmodSync(tuttiAgentBin, 0o755);
 
     const home = join(dir, ".tutti-agent-home");
     const detection = await detectCodex({
@@ -101,12 +119,12 @@ describe("detectCodex", () => {
   it("bounds Tutti Agent authentication probes", async () => {
     const dir = mkdtempSync(join(tmpdir(), "agent-acp-kit-tutti-auth-timeout-"));
     tempDirs.push(dir);
-    const tuttiAgentBin = join(dir, "tutti-agent");
-    writeFileSync(
-      tuttiAgentBin,
-      `#!${process.execPath}\nif (process.argv[2] === "--version") { console.log("tutti-agent 0.0.1"); process.exit(0); }\nif (process.argv[2] === "login") { setTimeout(() => {}, 10_000); } else { process.exit(1); }\n`,
+    const tuttiAgentBin = writeNodeCommand(
+      dir,
+      "tutti-agent",
+      `if (process.argv[2] === "--version") { console.log("tutti-agent 0.0.1"); process.exit(0); }
+if (process.argv[2] === "login") { setTimeout(() => {}, 10_000); } else { process.exit(1); }`,
     );
-    chmodSync(tuttiAgentBin, 0o755);
 
     const startedAt = Date.now();
     const detection = await detectCodex({
@@ -126,11 +144,11 @@ describe("detectCodex", () => {
     const dir = mkdtempSync(join(tmpdir(), "agent-acp-kit-codex-direct-"));
     const cwd = mkdtempSync(join(tmpdir(), "agent-acp-kit-codex-direct-cwd-"));
     tempDirs.push(dir, cwd);
-    const codexBin = join(dir, "codex");
     const marker = "direct-detect-marker";
-    writeFileSync(
-      codexBin,
-      `#!${process.execPath}
+    const codexBin = writeNodeCommand(
+      dir,
+      "codex",
+      `
 const fs = require("node:fs");
 const expectedCwd = fs.realpathSync(${JSON.stringify(cwd)});
 const expectedMarker = ${JSON.stringify(marker)};
@@ -155,7 +173,6 @@ if (process.argv[2] === "debug" && process.argv[3] === "models") {
 process.exit(1);
 `,
     );
-    chmodSync(codexBin, 0o755);
 
     const detection = await detectCodex({
       cwd,
@@ -180,11 +197,11 @@ process.exit(1);
   it("redacts configured secrets from version failures", async () => {
     const dir = mkdtempSync(join(tmpdir(), "agent-acp-kit-codex-redact-"));
     tempDirs.push(dir);
-    const codexBin = join(dir, "codex");
     const secret = "configured-redact-secret";
-    writeFileSync(
-      codexBin,
-      `#!${process.execPath}
+    const codexBin = writeNodeCommand(
+      dir,
+      "codex",
+      `
 if (process.argv[2] === "--version") {
   process.stderr.write("failed with " + process.env.APP_TEST_SECRET);
   process.exit(9);
@@ -192,7 +209,6 @@ if (process.argv[2] === "--version") {
 process.exit(1);
 `,
     );
-    chmodSync(codexBin, 0o755);
 
     const detection = await detectCodex({
       env: {
@@ -214,19 +230,20 @@ process.exit(1);
   it("discovers Codex models from the debug catalog", async () => {
     const dir = mkdtempSync(join(tmpdir(), "agent-acp-kit-codex-models-"));
     tempDirs.push(dir);
-    const codexBin = join(dir, "codex");
-    writeFileSync(
-      codexBin,
-      `#!/bin/sh
-if [ "$1" = "--version" ]; then echo "codex 1.2.3"; exit 0; fi
-if [ "$1" = "debug" ] && [ "$2" = "models" ]; then
-  printf '%s\\n' '{"models":[{"slug":"gpt-live","display_name":"GPT Live","visibility":"list"},{"slug":"codex-hidden","display_name":"Hidden","visibility":"hide"}]}'
-  exit 0
-fi
-exit 1
+    const codexBin = writeNodeCommand(
+      dir,
+      "codex",
+      `if (process.argv[2] === "--version") { console.log("codex 1.2.3"); process.exit(0); }
+if (process.argv[2] === "debug" && process.argv[3] === "models") {
+  console.log(JSON.stringify({ models: [
+    { slug: "gpt-live", display_name: "GPT Live", visibility: "list" },
+    { slug: "codex-hidden", display_name: "Hidden", visibility: "hide" },
+  ] }));
+  process.exit(0);
+}
+process.exit(1);
 `,
     );
-    chmodSync(codexBin, 0o755);
 
     const detection = await detectCodex({
       env: { PATH: dir, CODEX_HOME: join(dir, ".codex-home") },
@@ -241,10 +258,10 @@ exit 1
   it("prefers Codex app-server model/list over the debug catalog", async () => {
     const dir = mkdtempSync(join(tmpdir(), "agent-acp-kit-codex-app-server-"));
     tempDirs.push(dir);
-    const codexBin = join(dir, "codex");
-    writeFileSync(
-      codexBin,
-      `#!${process.execPath}
+    const codexBin = writeNodeCommand(
+      dir,
+      "codex",
+      `
 const readline = require("node:readline");
 if (process.argv[2] === "--version") {
   console.log("codex 1.2.3");
@@ -293,7 +310,6 @@ if (process.argv[2] === "app-server") {
 }
 `,
     );
-    chmodSync(codexBin, 0o755);
 
     const detection = await detectCodex({
       env: { PATH: dir, CODEX_HOME: join(dir, ".codex-home") },
@@ -310,19 +326,17 @@ if (process.argv[2] === "app-server") {
   it("does not expose bundled Codex catalog entries when refreshed discovery fails", async () => {
     const dir = mkdtempSync(join(tmpdir(), "agent-acp-kit-codex-bundled-models-"));
     tempDirs.push(dir);
-    const codexBin = join(dir, "codex");
-    writeFileSync(
-      codexBin,
-      `#!/bin/sh
-if [ "$1" = "--version" ]; then echo "codex 1.2.3"; exit 0; fi
-if [ "$1" = "debug" ] && [ "$2" = "models" ] && [ "$3" = "--bundled" ]; then
-  printf '%s\\n' '{"models":[{"slug":"gpt-bundled","display_name":"GPT Bundled","visibility":"list"}]}'
-  exit 0
-fi
-exit 1
+    const codexBin = writeNodeCommand(
+      dir,
+      "codex",
+      `if (process.argv[2] === "--version") { console.log("codex 1.2.3"); process.exit(0); }
+if (process.argv[2] === "debug" && process.argv[3] === "models" && process.argv[4] === "--bundled") {
+  console.log(JSON.stringify({ models: [{ slug: "gpt-bundled", display_name: "GPT Bundled", visibility: "list" }] }));
+  process.exit(0);
+}
+process.exit(1);
 `,
     );
-    chmodSync(codexBin, 0o755);
 
     const detection = await detectCodex({
       env: { PATH: dir, CODEX_HOME: join(dir, ".codex-home") },

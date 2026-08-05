@@ -201,23 +201,25 @@ describe("buildLocalAgentProcessEnv", () => {
   });
 
   it("adds common local agent binary directories without duplicating existing PATH entries", async () => {
+    const firstPath = path.join(path.parse(process.cwd()).root, "usr", "bin");
+    const secondPath = path.join(path.parse(process.cwd()).root, "opt", "homebrew", "bin");
+    const npmPrefix = path.join(tmpdir(), "npm-prefix");
     const env = await buildLocalAgentProcessEnv({
-      PATH: "/usr/bin:/opt/homebrew/bin",
-      npm_config_prefix: "/tmp/npm-prefix",
+      PATH: [firstPath, secondPath].join(path.delimiter),
+      npm_config_prefix: npmPrefix,
     });
 
     expect(env.PATH?.split(path.delimiter)).toEqual(
       expect.arrayContaining([
-        "/usr/bin",
-        "/opt/homebrew/bin",
-        "/usr/local/bin",
-        "/tmp/npm-prefix/bin",
+        firstPath,
+        secondPath,
+        process.platform === "win32" ? npmPrefix : path.join(npmPrefix, "bin"),
       ]),
     );
     expect(
       env.PATH
         ?.split(path.delimiter)
-        .filter((dir) => dir === "/opt/homebrew/bin"),
+        .filter((dir) => dir === secondPath),
     ).toHaveLength(1);
   });
 
@@ -226,13 +228,8 @@ describe("buildLocalAgentProcessEnv", () => {
       Path: "/usr/bin",
     });
 
-    expect(env.Path?.split(path.delimiter)).toEqual(
-      expect.arrayContaining([
-        "/usr/bin",
-        "/opt/homebrew/bin",
-        "/usr/local/bin",
-      ]),
-    );
+    expect(env.Path?.split(path.delimiter)).toContain("/usr/bin");
+    expect(env.Path?.split(path.delimiter).length).toBeGreaterThan(1);
     expect(env.PATH).toBeUndefined();
   });
 

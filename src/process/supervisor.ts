@@ -1,11 +1,8 @@
-import {
-  spawn,
-  type ChildProcessWithoutNullStreams,
-} from "node:child_process";
+import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 
-import { attachAbortSignal } from "./cancellation.js";
-import { resolveCommandExecutableSync } from "./command-resolver.js";
+import { attachAbortSignal, terminateProcessTree } from "./cancellation.js";
 import { mergeProcessEnv } from "./env.js";
+import { resolveProcessInvocation } from "./process-adapter.js";
 import { StderrBuffer } from "./stderr-buffer.js";
 
 export type SupervisedProcess = {
@@ -41,15 +38,18 @@ export function spawnSupervisedProcess(input: {
       ...(input.redactionSecrets ?? []),
     ].filter(Boolean),
   );
-  const command = resolveCommandExecutableSync({
+  const invocation = resolveProcessInvocation({
     command: input.command,
+    args: input.args,
     env,
-    ...(input.fallbackCommands ? { fallbackCommands: input.fallbackCommands } : {}),
+    ...(input.fallbackCommands
+      ? { fallbackCommands: input.fallbackCommands }
+      : {}),
     ...(input.overridePath ? { overridePath: input.overridePath } : {}),
   });
-  const child = spawn(command, input.args, {
+  const child = spawn(invocation.command, invocation.args, {
     cwd: input.cwd,
-    env,
+    env: invocation.env,
     stdio: ["pipe", "pipe", "pipe"],
   });
   let timedOut = false;
@@ -68,12 +68,12 @@ export function spawnSupervisedProcess(input: {
   if (input.timeoutMs && input.timeoutMs > 0) {
     timeout = setTimeout(() => {
       timedOut = true;
-      if (!child.killed) {
-        child.kill("SIGTERM");
+      if (child.exitCode === null && child.signalCode === null) {
+        terminateProcessTree(child, "SIGTERM");
       }
       killFallback = setTimeout(() => {
-        if (!child.killed) {
-          child.kill("SIGKILL");
+        if (child.exitCode === null && child.signalCode === null) {
+          terminateProcessTree(child, "SIGKILL");
         }
       }, input.killAfterMs ?? 2_000);
     }, input.timeoutMs);

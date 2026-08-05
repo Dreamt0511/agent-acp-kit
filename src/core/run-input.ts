@@ -9,6 +9,8 @@ export type AgentRunInput<
 > = {
   /** Exact Tutti Agent Target selected from runtime.detect(). */
   agentTargetId?: string;
+  /** Exact executable resolved by the Tutti host for this Agent Target. */
+  executablePath?: string;
   runId: string;
   sessionId?: string;
   conversationId?: string;

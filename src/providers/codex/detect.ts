@@ -7,6 +7,25 @@ import { promisify } from "node:util";
 import type { AgentModelOption } from "../../core/provider-plugin.js";
 import { redactSecrets } from "../../core/redaction.js";
 import { resolveCommandExecutable } from "../../process/command-resolver.js";
+import { resolveProcessInvocation } from "../../process/process-adapter.js";
+
+function batchExecFileAsync(
+  executablePath: string,
+  args: string[],
+  options: Parameters<typeof execFileAsync>[2] = {},
+) {
+  const invocation = resolveProcessInvocation({
+    command: executablePath,
+    args,
+    env: options?.env as NodeJS.ProcessEnv | undefined,
+    overridePath: executablePath,
+  });
+  return execFileAsync(invocation.command, invocation.args, {
+    ...options,
+    encoding: "utf8",
+    env: invocation.env,
+  });
+}
 
 const execFileAsync = promisify(execFile);
 const CODEX_MODEL_DISCOVERY_TIMEOUT_MS = 5_000;
@@ -36,7 +55,7 @@ async function detectCodexAuthState(options: {
   executablePath: string;
 }) {
   try {
-    const result = await execFileAsync(
+    const result = await batchExecFileAsync(
       options.executablePath,
       ["login", "status"],
       {
@@ -49,9 +68,7 @@ async function detectCodexAuthState(options: {
     if (text.includes("not logged in") || text.includes("logged out")) {
       return "missing" as const;
     }
-    return text.includes("logged in")
-      ? ("ok" as const)
-      : ("unknown" as const);
+    return text.includes("logged in") ? ("ok" as const) : ("unknown" as const);
   } catch (error) {
     const text = authStatusText(error).toLowerCase();
     if (text.includes("not logged in") || text.includes("logged out")) {
@@ -148,9 +165,15 @@ function normalizeCodexCatalog(payload: unknown): AgentModelOption[] {
     if (record.hidden === true || record.visibility === "hide") continue;
     if (isSupersededCodexModel(record, upgradedModelIds)) continue;
 
-    const id = getString(record, "id") ?? getString(record, "model") ?? getString(record, "slug");
+    const id =
+      getString(record, "id") ??
+      getString(record, "model") ??
+      getString(record, "slug");
     if (!id) continue;
-    const label = getString(record, "displayName") ?? getString(record, "display_name") ?? id;
+    const label =
+      getString(record, "displayName") ??
+      getString(record, "display_name") ??
+      id;
     appendModel(id, label, getString(record, "description"));
 
     const upgrade = getString(record, "upgrade");
@@ -174,9 +197,15 @@ async function loadCodexAppServerModelCatalog(
   env: NodeJS.ProcessEnv | undefined,
   cwd: string | undefined,
 ) {
-  const child = spawn(executablePath, ["app-server"], {
+  const invocation = resolveProcessInvocation({
+    command: executablePath,
+    args: ["app-server"],
+    env,
+    overridePath: executablePath,
+  });
+  const child = spawn(invocation.command, invocation.args, {
     ...(cwd ? { cwd } : {}),
-    ...(env ? { env } : {}),
+    env: invocation.env,
     stdio: ["pipe", "pipe", "pipe"],
   });
   const rl = readline.createInterface({ input: child.stdout });
@@ -238,7 +267,8 @@ async function loadCodexAppServerModelCatalog(
     if (error) {
       waiter.reject(
         new Error(
-          getString(error, "message") ?? `Codex app-server request ${id} failed.`,
+          getString(error, "message") ??
+            `Codex app-server request ${id} failed.`,
         ),
       );
       return;
@@ -270,7 +300,9 @@ async function loadCodexAppServerModelCatalog(
       },
       capabilities: { experimentalApi: true },
     });
-    child.stdin.write(`${JSON.stringify({ method: "initialized", params: {} })}\n`);
+    child.stdin.write(
+      `${JSON.stringify({ method: "initialized", params: {} })}\n`,
+    );
     return normalizeCodexCatalog(
       await request("model/list", { includeHidden: false }),
     );
@@ -291,12 +323,16 @@ async function loadCodexDebugModelCatalog(
   env: NodeJS.ProcessEnv | undefined,
   cwd: string | undefined,
 ) {
-  const { stdout } = await execFileAsync(executablePath, ["debug", "models"], {
-    ...(cwd ? { cwd } : {}),
-    ...(env ? { env } : {}),
-    maxBuffer: CODEX_MODEL_DISCOVERY_MAX_BUFFER,
-    timeout: CODEX_MODEL_DISCOVERY_TIMEOUT_MS,
-  });
+  const { stdout } = await batchExecFileAsync(
+    executablePath,
+    ["debug", "models"],
+    {
+      ...(cwd ? { cwd } : {}),
+      ...(env ? { env } : {}),
+      maxBuffer: CODEX_MODEL_DISCOVERY_MAX_BUFFER,
+      timeout: CODEX_MODEL_DISCOVERY_TIMEOUT_MS,
+    },
+  );
   return normalizeCodexCatalog(JSON.parse(stdout) as unknown);
 }
 
@@ -358,14 +394,16 @@ export async function detectCodex(options?: {
       skillsDir: path.join(configDir, "skills"),
       supported: false,
       unsupportedReason:
-        error instanceof Error ? error.message : `Executable not found: ${command}`,
+        error instanceof Error
+          ? error.message
+          : `Executable not found: ${command}`,
       version: "not-installed",
     };
   }
 
   let stdout: string;
   try {
-    ({ stdout } = await execFileAsync(executablePath, ["--version"], {
+    ({ stdout } = await batchExecFileAsync(executablePath, ["--version"], {
       ...(options?.cwd ? { cwd: options.cwd } : {}),
       env: options?.env,
     }));

@@ -310,6 +310,32 @@ describe("buildCodexLaunchPlan", () => {
     }
   });
 
+  it("uses the host-resolved executable for a Tutti Agent run", async () => {
+    const scratch = await mkdtemp(join(tmpdir(), "tutti-agent-resolved-command-"));
+    const sourceHome = join(scratch, "source-home");
+    const cwd = join(scratch, "workspace");
+    let runHome: string | undefined;
+    try {
+      await mkdir(sourceHome, { recursive: true });
+      await mkdir(cwd, { recursive: true });
+      await writeFile(join(sourceHome, "auth.json"), "{}", "utf8");
+      const executablePath = "C:\\resolved\\tutti-agent.cmd";
+      const plan = await createTuttiAgentProvider().buildLaunchPlan({
+        runId: "run-tutti-agent-resolved-command",
+        cwd,
+        prompt: "hello",
+        executablePath,
+        env: { TUTTI_AGENT_HOME: sourceHome },
+      });
+
+      runHome = plan.env?.TUTTI_AGENT_HOME;
+      expect(plan.command).toBe(executablePath);
+    } finally {
+      await rm(scratch, { recursive: true, force: true });
+      if (runHome) await rm(runHome, { recursive: true, force: true });
+    }
+  });
+
   it("uses the run-scoped Tutti Agent home for selected skills", async () => {
     const scratch = await mkdtemp(join(tmpdir(), "tutti-agent-skill-plan-"));
     const sourceHome = join(scratch, "source-home");

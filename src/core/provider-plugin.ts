@@ -32,9 +32,14 @@ export type RuntimeKindSelectorInput<
 export type RuntimeKindSelector<
   TKind extends string = string,
   TProvider extends string = string,
-> = (input: RuntimeKindSelectorInput<TKind, TProvider>) => RuntimeTarget<TKind, TProvider>;
+> = (
+  input: RuntimeKindSelectorInput<TKind, TProvider>,
+) => RuntimeTarget<TKind, TProvider>;
 
-export type RuntimeLease<TKind extends string = string, TProvider extends string = string> = {
+export type RuntimeLease<
+  TKind extends string = string,
+  TProvider extends string = string,
+> = {
   runId: string;
   runtimeId: string;
   target: RuntimeTarget<TKind, TProvider>;
@@ -52,23 +57,26 @@ export type AgentDetectionDiagnostic = {
   source?: string;
 };
 
-export type AgentDetection<TModel extends AgentModelOption = AgentModelOption> = {
-  authState: "ok" | "missing" | "expired" | "unknown";
-  executablePath: string;
-  configDir?: string;
-  diagnostics?: AgentDetectionDiagnostic[];
-  minimumVersion?: string;
-  models?: TModel[];
-  skillsDir?: string;
-  supported?: boolean;
-  unsupportedReason?: string;
-  version: string;
-};
+export type AgentDetection<TModel extends AgentModelOption = AgentModelOption> =
+  {
+    authState: "ok" | "missing" | "expired" | "unknown";
+    executablePath: string;
+    configDir?: string;
+    diagnostics?: AgentDetectionDiagnostic[];
+    minimumVersion?: string;
+    models?: TModel[];
+    skillsDir?: string;
+    supported?: boolean;
+    unsupportedReason?: string;
+    version: string;
+  };
 
 /** Stable app-facing provider discovery result returned by runtime.detect(). */
 export type DetectedProvider<TProvider extends string = string> = {
   /** Exact Agent Target associated with this runtime when unambiguous. */
   agentTargetId?: string;
+  /** Resolved native executable used to launch this Agent Target. */
+  executablePath?: string;
   provider: TProvider;
   displayName: string;
   supported: boolean;
@@ -85,9 +93,14 @@ export type AgentRunMessage = {
   content: string;
 };
 
-export type AgentRunParams<TKind extends string = string, TProvider extends string = string> = {
+export type AgentRunParams<
+  TKind extends string = string,
+  TProvider extends string = string,
+> = {
   /** Exact Tutti Agent Target selected from runtime.detect(). */
   agentTargetId?: string;
+  /** Exact executable resolved by the Tutti host for this Agent Target. */
+  executablePath?: string;
   runId: string;
   cwd: string;
   prompt: string;
@@ -124,7 +137,9 @@ export type LocalAgentProviderAdapter<
   TKind extends string = string,
   TProvider extends string = string,
 > = {
-  buildLaunchPlan(params: AgentRunParams<TKind, TProvider>): Promise<ProviderLaunchPlan>;
+  buildLaunchPlan(
+    params: AgentRunParams<TKind, TProvider>,
+  ): Promise<ProviderLaunchPlan>;
   parseEvents(stream: RawAgentStream): AsyncIterable<AgentEvent>;
   capabilities(): AgentRuntimeRecord<TKind, TProvider>["capabilities"];
 };
@@ -143,7 +158,9 @@ export type LocalAgentProviderPlugin<
   detect(context?: DetectContext): Promise<AgentDetection | null>;
   capabilities(): AgentRuntimeRecord<TKind, TProvider>["capabilities"];
   createAdapter?(): LocalAgentProviderAdapter<TKind, TProvider>;
-  buildLaunchPlan(params: AgentRunParams<TKind, TProvider>): Promise<ProviderLaunchPlan>;
+  buildLaunchPlan(
+    params: AgentRunParams<TKind, TProvider>,
+  ): Promise<ProviderLaunchPlan>;
   run(params: AgentRunParams<TKind, TProvider>): AsyncGenerator<AgentEvent>;
   cancel?(runId: string): Promise<void>;
 };

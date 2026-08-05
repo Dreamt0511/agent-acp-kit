@@ -50,10 +50,24 @@ describe("runAcpTransport", () => {
     const events = [];
     const script = createFakeAcpPeerScript({
       updates: [
-        { sessionUpdate: "text_delta", content: { type: "text", text: "hello" } },
-        { sessionUpdate: "agent_thought_chunk", content: { type: "text", text: "thought" } },
-        { sessionUpdate: "reasoning_delta", content: { type: "text", text: "thinking" } },
-        { type: "tool_call", id: "tool_1", name: "generate_image", input: { prompt: "x" } },
+        {
+          sessionUpdate: "text_delta",
+          content: { type: "text", text: "hello" },
+        },
+        {
+          sessionUpdate: "agent_thought_chunk",
+          content: { type: "text", text: "thought" },
+        },
+        {
+          sessionUpdate: "reasoning_delta",
+          content: { type: "text", text: "thinking" },
+        },
+        {
+          type: "tool_call",
+          id: "tool_1",
+          name: "generate_image",
+          input: { prompt: "x" },
+        },
         {
           type: "tool_result",
           id: "tool_1",
@@ -215,21 +229,24 @@ describe("runAcpTransport", () => {
         prompt: "call MCP",
         runId: "run_acp_mcp_title",
       },
-    )) events.push(event);
+    ))
+      events.push(event);
 
-    expect(events).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        type: "tool_call",
-        id: "call_mcp_1",
-        name: "validation_echo",
-      }),
-      expect.objectContaining({
-        type: "tool_result",
-        id: "call_mcp_1",
-        name: "validation_echo",
-        status: "completed",
-      }),
-    ]));
+    expect(events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "tool_call",
+          id: "call_mcp_1",
+          name: "validation_echo",
+        }),
+        expect.objectContaining({
+          type: "tool_result",
+          id: "call_mcp_1",
+          name: "validation_echo",
+          status: "completed",
+        }),
+      ]),
+    );
   });
 
   it("forwards MCP servers through session/new and reclaims a long-lived ACP peer", async () => {
@@ -284,16 +301,19 @@ process.stdin.on("data", (chunk) => {
       },
       {
         cwd: process.cwd(),
-        mcpServers: [{
-          name: "validation",
-          command: "node",
-          args: ["server.mjs"],
-          env: { TOKEN: "secret" },
-        }],
+        mcpServers: [
+          {
+            name: "validation",
+            command: "node",
+            args: ["server.mjs"],
+            env: { TOKEN: "secret" },
+          },
+        ],
         prompt: "call MCP",
         runId: "run_acp_mcp_forwarding",
       },
-    )) events.push(event);
+    ))
+      events.push(event);
 
     expect(Date.now() - startedAt).toBeLessThan(2_000);
     expect(events).toEqual([
@@ -487,16 +507,19 @@ process.stdin.on("data", (chunk) => {
         prompt: "hello",
         runId: "run_acp_missing_session",
       },
-    )) events.push(event);
+    ))
+      events.push(event);
 
-    expect(events).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        type: "error",
-        code: "acp_lifecycle_failed",
-        message: "ACP session/new did not return a sessionId.",
-      }),
-      expect.objectContaining({ type: "done", status: "failed" }),
-    ]));
+    expect(events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "error",
+          code: "acp_lifecycle_failed",
+          message: "ACP session/new did not return a sessionId.",
+        }),
+        expect.objectContaining({ type: "done", status: "failed" }),
+      ]),
+    );
   });
 
   it("reports signal termination after prompt acknowledgement as canceled", async () => {

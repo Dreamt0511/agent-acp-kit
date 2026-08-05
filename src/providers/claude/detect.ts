@@ -6,6 +6,7 @@ import { promisify } from "node:util";
 import type { AgentModelOption } from "../../core/provider-plugin.js";
 import { redactSecrets } from "../../core/redaction.js";
 import { resolveCommandExecutable } from "../../process/command-resolver.js";
+import { resolveProcessInvocation } from "../../process/process-adapter.js";
 
 const execFileAsync = promisify(execFile);
 const CLAUDE_MODEL_DISCOVERY_TIMEOUT_MS = 8_000;
@@ -74,12 +75,18 @@ export async function detectClaudeAuthState(input: {
   executablePath: string;
 }) {
   try {
+    const invocation = resolveProcessInvocation({
+      command: input.executablePath,
+      args: ["auth", "status"],
+      env: input.env,
+      overridePath: input.executablePath,
+    });
     const { stdout } = await execFileAsync(
-      input.executablePath,
-      ["auth", "status"],
+      invocation.command,
+      invocation.args,
       {
         ...(input.cwd ? { cwd: input.cwd } : {}),
-        env: input.env,
+        env: invocation.env,
         timeout: CLAUDE_AUTH_STATUS_TIMEOUT_MS,
       },
     );
@@ -236,9 +243,15 @@ export async function detectClaude(options?: {
 
   let stdout: string;
   try {
-    ({ stdout } = await execFileAsync(executablePath, ["--version"], {
-      ...(options?.cwd ? { cwd: options.cwd } : {}),
+    const invocation = resolveProcessInvocation({
+      command: executablePath,
+      args: ["--version"],
       env: options?.env,
+      overridePath: executablePath,
+    });
+    ({ stdout } = await execFileAsync(invocation.command, invocation.args, {
+      ...(options?.cwd ? { cwd: options.cwd } : {}),
+      env: invocation.env,
     }));
   } catch (error) {
     return {

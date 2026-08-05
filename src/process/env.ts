@@ -1,6 +1,9 @@
 import { execFileSync, spawn } from "node:child_process";
+import { existsSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import { homedir, platform, tmpdir } from "node:os";
 import path from "node:path";
+import { resolveProcessInvocation } from "./process-adapter.js";
 
 // System proxy injection.
 //
@@ -50,9 +53,7 @@ function getPathEnvKey(env: NodeJS.ProcessEnv) {
   if (Object.prototype.hasOwnProperty.call(env, "PATH")) {
     return "PATH";
   }
-  return (
-    Object.keys(env).find((key) => key.toUpperCase() === "PATH") ?? "PATH"
-  );
+  return Object.keys(env).find((key) => key.toUpperCase() === "PATH") ?? "PATH";
 }
 
 function getPathEnv(env: NodeJS.ProcessEnv) {
@@ -69,7 +70,10 @@ function setPathEnv(env: NodeJS.ProcessEnv, value: string) {
   env[pathKey] = value;
 }
 
-function deleteEnvKeysCaseInsensitive(env: NodeJS.ProcessEnv, keys: readonly string[]) {
+function deleteEnvKeysCaseInsensitive(
+  env: NodeJS.ProcessEnv,
+  keys: readonly string[],
+) {
   const targets = new Set(keys.map((key) => key.toUpperCase()));
   for (const key of Object.keys(env)) {
     if (targets.has(key.toUpperCase())) {
@@ -78,7 +82,32 @@ function deleteEnvKeysCaseInsensitive(env: NodeJS.ProcessEnv, keys: readonly str
   }
 }
 
+/**
+ * Standard Windows locations that may hold globally installed CLI shims
+ * (npm/pnpm/yarn). These are derived from the home directory instead of
+ * inherited env vars because host PATH propagation (e.g. through MSYS bash)
+ * can drop APPDATA/LOCALAPPDATA and the npm prefix variables entirely.
+ */
+function npmGlobalCandidateDirs(env: NodeJS.ProcessEnv): string[] {
+  const home = homedir();
+  return [
+    // npm's default global bin directory.
+    path.join(home, "AppData", "Roaming", "npm"),
+    // pnpm's global bin directory.
+    path.join(home, "AppData", "Local", "pnpm"),
+    // Explicit prefixes from env survive on most setups; keep honoring them.
+    env.PNPM_HOME ?? "",
+    env.APPDATA ? path.join(env.APPDATA, "npm") : "",
+    env.LOCALAPPDATA ? path.join(env.LOCALAPPDATA, "pnpm") : "",
+    env.npm_config_prefix ?? "",
+    env.NPM_CONFIG_PREFIX ?? "",
+  ].filter(Boolean);
+}
+
 function localAgentPathCandidates(env: NodeJS.ProcessEnv) {
+  if (process.platform === "win32") {
+    return npmGlobalCandidateDirs(env);
+  }
   return [
     "/opt/homebrew/bin",
     "/usr/local/bin",
@@ -86,6 +115,21 @@ function localAgentPathCandidates(env: NodeJS.ProcessEnv) {
     env.npm_config_prefix ? path.join(env.npm_config_prefix, "bin") : "",
     env.NPM_CONFIG_PREFIX ? path.join(env.NPM_CONFIG_PREFIX, "bin") : "",
   ].filter(Boolean);
+}
+
+/**
+ * Reads a `prefix=` line from the user-level npmrc, honoring an explicit
+ * npm global prefix configured with `npm config set prefix`.
+ */
+async function resolveNpmrcGlobalPrefix(): Promise<string | undefined> {
+  try {
+    const content = await readFile(path.join(homedir(), ".npmrc"), "utf8");
+    const match = content.match(/^\s*prefix\s*=\s*([^\s#][^\r\n]*)$/m);
+    const prefix = match?.[1]?.trim();
+    return prefix || undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 export function appendUniquePathDirs(
@@ -109,12 +153,24 @@ function npmGlobalBinFromPrefix(prefix: string) {
   return platform() === "win32" ? prefix : path.join(prefix, "bin");
 }
 
-async function resolveNpmGlobalPrefix(
+async function runNpmPrefixCommand(
+  command: string,
   env: NodeJS.ProcessEnv,
 ): Promise<string | undefined> {
   return new Promise((resolve) => {
-    const child = spawn("npm", ["prefix", "-g"], {
-      env,
+    let invocation;
+    try {
+      invocation = resolveProcessInvocation({
+        command,
+        args: ["prefix", "-g"],
+        env,
+      });
+    } catch {
+      resolve(undefined);
+      return;
+    }
+    const child = spawn(invocation.command, invocation.args, {
+      env: invocation.env,
       stdio: ["ignore", "pipe", "ignore"],
     });
     let stdout = "";
@@ -142,6 +198,32 @@ async function resolveNpmGlobalPrefix(
   });
 }
 
+async function resolveNpmGlobalPrefix(
+  env: NodeJS.ProcessEnv,
+): Promise<string | undefined> {
+  // 1. `npm` on the inherited PATH (may be missing when host PATH
+  //    propagation dropped the npm global directory).
+  const onPath = await runNpmPrefixCommand(
+    process.platform === "win32" ? "npm.cmd" : "npm",
+    env,
+  );
+  if (onPath) return onPath;
+
+  // 2. npm.cmd at the standard global locations, reached without PATH.
+  if (process.platform === "win32") {
+    for (const dir of npmGlobalCandidateDirs(env)) {
+      const npmCmd = path.join(dir, "npm.cmd");
+      if (existsSync(npmCmd)) {
+        const prefix = await runNpmPrefixCommand(npmCmd, env);
+        if (prefix) return prefix;
+      }
+    }
+  }
+
+  // 3. Explicit prefix configured in the user-level npmrc.
+  return await resolveNpmrcGlobalPrefix();
+}
+
 export async function buildLocalAgentProcessEnv(
   baseEnv: NodeJS.ProcessEnv = process.env,
 ): Promise<Record<string, string>> {
@@ -152,7 +234,9 @@ export async function buildLocalAgentProcessEnv(
   if (npmPrefix) {
     setPathEnv(
       env,
-      appendUniquePathDirs(getPathEnv(env), [npmGlobalBinFromPrefix(npmPrefix)]),
+      appendUniquePathDirs(getPathEnv(env), [
+        npmGlobalBinFromPrefix(npmPrefix),
+      ]),
     );
   }
 

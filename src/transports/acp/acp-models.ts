@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 
 import { StderrBuffer } from "../../process/stderr-buffer.js";
+import { resolveWindowsBatchCommand } from "../../process/windows-batch.js";
 import { createJsonRpcLineParser, sendJsonRpc } from "./acp-jsonrpc.js";
 import { buildAcpSessionNewParams } from "./acp-session.js";
 
@@ -60,10 +61,17 @@ export async function detectAcpModels(input: {
   return await new Promise<Array<{ id: string; label: string }>>(
     (resolve, reject) => {
       const stderr = new StderrBuffer(16_000, input.redactionSecrets ?? []);
-      const child = spawn(input.bin, input.args, {
+      const batchExec = resolveWindowsBatchCommand(
+        input.bin,
+        input.args,
+        process.platform,
+        { env: input.env },
+      );
+      const child = spawn(batchExec?.command ?? input.bin, batchExec?.args ?? input.args, {
         cwd: input.cwd,
-        env: input.env,
+        env: batchExec?.env ? { ...input.env, ...batchExec.env } : input.env,
         stdio: ["pipe", "pipe", "pipe"],
+        ...(batchExec?.windowsVerbatimArguments ? { windowsVerbatimArguments: true } : {}),
       });
 
       child.stdout.setEncoding("utf8");

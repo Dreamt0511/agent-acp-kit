@@ -777,7 +777,7 @@ function createCodexCompatibleProvider<TProvider extends string>(
           ...(normalizedModel ? { model: normalizedModel } : {}),
           prompt,
         },
-        options.command,
+        params.executablePath ?? options.command,
       );
       if (redactionSecrets.length === 0) return plan;
       return {

@@ -17,7 +17,12 @@ describe("spawnSupervisedProcess", () => {
     const result = await processHandle.waitForExit();
 
     expect(result.timedOut).toBe(true);
-    expect(result.signal).toBeTruthy();
+    if (process.platform === "win32") {
+      // taskkill /t /f terminates without a POSIX-style signal.
+      expect(result.signal ?? result.code).toBeTruthy();
+    } else {
+      expect(result.signal).toBeTruthy();
+    }
   });
 
   it("redacts explicit MCP/tool secrets from stderr tails", async () => {

@@ -147,7 +147,10 @@ export function createTuttiRuntimeIntegration<
         `Agent Target provider mismatch: ${run.agentTargetId} resolves to ${composer.providerId}, got ${String(run.provider)}.`,
       );
     }
-    return applyComposerToRun(run, composer);
+    const agent = catalog.agents.find(
+      (candidate) => candidate.agentTargetId === run.agentTargetId,
+    );
+    return applyComposerToRun(run, composer, agent?.executablePath);
   };
 
   return { detect, prepareRun };
@@ -265,11 +268,13 @@ function projectUnavailableTarget<TKind extends string, TProvider extends string
 function applyComposerToRun<TKind extends string, TProvider extends string>(
   run: AgentRunInput<TKind, TProvider>,
   composer: TuttiAgentComposerOptions,
+  executablePath?: string,
 ): AgentRunInput<TKind, TProvider> {
   const model = run.model || composer.modelConfig.currentValue || composer.modelConfig.defaultValue;
   const reasoning = run.reasoning || composer.reasoningConfig.currentValue || composer.reasoningConfig.defaultValue;
   return {
     ...run,
+    ...(executablePath ? { executablePath } : {}),
     ...(model ? { model } : {}),
     ...(reasoning ? { reasoning } : {}),
     // Composer permission defaults are UI state. Execution permission comes

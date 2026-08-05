@@ -203,7 +203,14 @@ composer JSON and preserves every exact Agent Target, including multiple
 targets backed by one runtime provider. Without `TUTTI_CLI` it performs direct
 Provider plugin detection. `runtime.run()` accepts the selected
 `agentTargetId` and applies its latest target-scoped model and reasoning
-defaults internally before launching the app-owned local Provider process.
+defaults internally before launching the app-owned local Provider process. When
+the Tutti catalog provides an exact `executablePath`, the integration carries it
+through `AgentRunInput` to the selected Provider launch plan. This avoids asking
+an app process to rediscover a configured Agent CLI from its inherited `PATH`;
+older catalogs and standalone hosts continue to use provider-native discovery.
+On Windows, process launch resolves native executables, npm/node shims, and
+PowerShell `-File` shims without routing Agent arguments through `cmd.exe`;
+unknown batch programs fail closed.
 Composer permission defaults are UI presentation state and do not override an
 autonomous Workspace App run. Permission comes only from an explicit
 `AgentRunInput.permission` selection or the SDK autonomous default described

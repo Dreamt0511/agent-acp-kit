@@ -33,7 +33,7 @@ describe("resolveCommandExecutable", () => {
 
     expect(
       await resolveCommandExecutable({
-        command: "claude",
+        command: "agent-acp-kit-definitely-missing",
         env: { PATH: dir },
         fallbackCommands: ["openclaude"],
       }),

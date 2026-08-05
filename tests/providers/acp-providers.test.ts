@@ -21,6 +21,20 @@ import {
 } from "../../src/index.js";
 import { createFakeAcpPeerScript } from "../../src/testing/index.js";
 
+function writeNodeCommand(dir: string, name: string, source: string) {
+  if (process.platform === "win32") {
+    const scriptPath = join(dir, `${name}.js`);
+    const commandPath = join(dir, `${name}.cmd`);
+    writeFileSync(scriptPath, source);
+    writeFileSync(commandPath, `@"${process.execPath}" "${scriptPath}" %*\r\n`);
+    return commandPath;
+  }
+  const commandPath = join(dir, name);
+  writeFileSync(commandPath, `#!${process.execPath}\n${source}`);
+  chmodSync(commandPath, 0o755);
+  return commandPath;
+}
+
 describe("ACP provider wrappers", () => {
   const tempDirs: string[] = [];
 
@@ -50,16 +64,15 @@ describe("ACP provider wrappers", () => {
   it("keeps a redacted diagnostic when ACP model discovery fails", async () => {
     const dir = mkdtempSync(join(tmpdir(), "agent-acp-kit-acp-diagnostic-"));
     tempDirs.push(dir);
-    const command = join(dir, "broken-acp");
     const secret = "acp-diagnostic-secret";
-    writeFileSync(
-      command,
-      `#!${process.execPath}
+    const command = writeNodeCommand(
+      dir,
+      "broken-acp",
+      `
 process.stderr.write("registry probe failed with ${secret}");
 setTimeout(() => process.exit(42), 10);
 `,
     );
-    chmodSync(command, 0o755);
     const provider = createGenericAcpProvider({
       args: [],
       command: "broken-acp",
@@ -128,6 +141,27 @@ setTimeout(() => process.exit(42), 10);
         nativeResume: false,
         streaming: true,
       });
+    }
+  });
+
+  it("uses the host-resolved executable for an ACP run", async () => {
+    const provider = createGenericAcpProvider({
+      args: ["acp"],
+      command: "cursor-agent",
+      displayName: "Cursor",
+      providerId: "cursor",
+    });
+    const adapter = provider.createAdapter!();
+    const plan = await adapter.buildLaunchPlan({
+      runId: "run-resolved-cursor",
+      cwd: "/tmp",
+      prompt: "hello",
+      executablePath: process.execPath,
+    });
+
+    expect(plan.command).toBe(process.execPath);
+    for await (const _event of adapter.parseEvents((async function* () {})())) {
+      // Drain to clean the run-scoped provider temp root.
     }
   });
 
@@ -312,14 +346,13 @@ setTimeout(() => process.exit(42), 10);
   it("runs every known ACP preset through the shared transport and cleanup lifecycle", async () => {
     const scratch = mkdtempSync(join(tmpdir(), "agent-acp-kit-known-acp-runs-"));
     tempDirs.push(scratch);
-    const command = join(scratch, "fake-acp-provider");
-    writeFileSync(
-      command,
-      `#!${process.execPath}\n${createFakeAcpPeerScript({
+    const command = writeNodeCommand(
+      scratch,
+      "fake-acp-provider",
+      createFakeAcpPeerScript({
         updates: [{ type: "text_delta", text: "PRESET_OK" }],
-      })}`,
+      }),
     );
-    chmodSync(command, 0o755);
 
     for (const spec of ACP_PROVIDER_SPECS) {
       const cwd = join(scratch, `workspace-${spec.id}`);

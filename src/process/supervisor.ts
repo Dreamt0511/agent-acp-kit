@@ -3,10 +3,11 @@ import {
   type ChildProcessWithoutNullStreams,
 } from "node:child_process";
 
-import { attachAbortSignal } from "./cancellation.js";
+import { attachAbortSignal, terminateProcessTree } from "./cancellation.js";
 import { resolveCommandExecutableSync } from "./command-resolver.js";
 import { mergeProcessEnv } from "./env.js";
 import { StderrBuffer } from "./stderr-buffer.js";
+import { resolveWindowsBatchCommand } from "./windows-batch.js";
 
 export type SupervisedProcess = {
   child: ChildProcessWithoutNullStreams;
@@ -47,10 +48,19 @@ export function spawnSupervisedProcess(input: {
     ...(input.fallbackCommands ? { fallbackCommands: input.fallbackCommands } : {}),
     ...(input.overridePath ? { overridePath: input.overridePath } : {}),
   });
-  const child = spawn(command, input.args, {
+  const batchExec = resolveWindowsBatchCommand(
+    command,
+    input.args,
+    process.platform,
+    { env },
+  );
+  const child = spawn(batchExec?.command ?? command, batchExec?.args ?? input.args, {
     cwd: input.cwd,
-    env,
+    env: batchExec?.env ? { ...env, ...batchExec.env } : env,
     stdio: ["pipe", "pipe", "pipe"],
+    ...(batchExec?.windowsVerbatimArguments
+      ? { windowsVerbatimArguments: true }
+      : {}),
   });
   let timedOut = false;
   let timeout: NodeJS.Timeout | undefined;
@@ -69,11 +79,11 @@ export function spawnSupervisedProcess(input: {
     timeout = setTimeout(() => {
       timedOut = true;
       if (!child.killed) {
-        child.kill("SIGTERM");
+        terminateProcessTree(child, "SIGTERM");
       }
       killFallback = setTimeout(() => {
         if (!child.killed) {
-          child.kill("SIGKILL");
+          terminateProcessTree(child, "SIGKILL");
         }
       }, input.killAfterMs ?? 2_000);
     }, input.timeoutMs);

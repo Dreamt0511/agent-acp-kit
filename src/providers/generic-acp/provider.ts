@@ -122,7 +122,7 @@ export function createGenericAcpProvider(input: {
         });
         return {
           args: input.args,
-          command: input.command,
+          command: params.executablePath ?? input.command,
           cwd: params.cwd,
           env: {
             ...(params.env ?? {}),

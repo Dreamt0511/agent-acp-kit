@@ -164,6 +164,7 @@ function parseCatalogEntries(input: {
     const runtimeRegistered = runtimeProviderIds.has(providerId);
     const runtimeSupported = runtimeRegistered;
     const platformAvailability = parseAvailability(value.availability, index);
+    const executablePath = optionalString(value.executablePath);
     const availability = runtimeSupported
       ? platformAvailability
       : {
@@ -175,6 +176,7 @@ function parseCatalogEntries(input: {
       agentTargetId,
       providerId,
       displayName: requiredString(value[input.displayNameField], `agents[${index}].displayName`),
+      ...(executablePath ? { executablePath } : {}),
       availability,
       runtimeSupported,
     } satisfies TuttiAgentCatalogEntry;

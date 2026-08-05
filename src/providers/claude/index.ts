@@ -144,7 +144,7 @@ export function createClaudeProvider(): LocalAgentProviderPlugin<
             ...(params.systemPrompt ? { systemPrompt: params.systemPrompt } : {}),
           }),
         },
-        "claude",
+        params.executablePath ?? "claude",
       );
     }
     return runWorkspaces.prepare(params.runId, params.env, async (workspace) => {
@@ -176,7 +176,7 @@ export function createClaudeProvider(): LocalAgentProviderPlugin<
           ...params,
           prompt,
         },
-        "claude",
+        params.executablePath ?? "claude",
         mcpConfig.mcpConfigPath
           ? { mcpConfigPath: mcpConfig.mcpConfigPath }
           : undefined,

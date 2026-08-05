@@ -88,6 +88,8 @@ export type AgentRunMessage = {
 export type AgentRunParams<TKind extends string = string, TProvider extends string = string> = {
   /** Exact Tutti Agent Target selected from runtime.detect(). */
   agentTargetId?: string;
+  /** Exact executable resolved by the Tutti host for this Agent Target. */
+  executablePath?: string;
   runId: string;
   cwd: string;
   prompt: string;

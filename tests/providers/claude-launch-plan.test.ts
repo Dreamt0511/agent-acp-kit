@@ -19,6 +19,18 @@ describe("buildClaudeLaunchPlan", () => {
     });
   });
 
+  it("uses the host-resolved executable for a Claude run", async () => {
+    const executablePath = "C:\\resolved\\claude.cmd";
+    const plan = await createClaudeProvider().buildLaunchPlan({
+      runId: "run-resolved-claude",
+      cwd: "/tmp/project",
+      prompt: "hello",
+      executablePath,
+    });
+
+    expect(plan.command).toBe(executablePath);
+  });
+
   it("builds a stream-json stdin launch plan with repeatable add-dir flags", () => {
     expect(
       buildClaudeLaunchPlan({

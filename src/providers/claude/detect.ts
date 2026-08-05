@@ -6,6 +6,7 @@ import { promisify } from "node:util";
 import type { AgentModelOption } from "../../core/provider-plugin.js";
 import { redactSecrets } from "../../core/redaction.js";
 import { resolveCommandExecutable } from "../../process/command-resolver.js";
+import { resolveWindowsBatchCommand } from "../../process/windows-batch.js";
 
 const execFileAsync = promisify(execFile);
 const CLAUDE_MODEL_DISCOVERY_TIMEOUT_MS = 8_000;
@@ -74,13 +75,20 @@ export async function detectClaudeAuthState(input: {
   executablePath: string;
 }) {
   try {
-    const { stdout } = await execFileAsync(
+    const batchExec = resolveWindowsBatchCommand(
       input.executablePath,
       ["auth", "status"],
+      process.platform,
+      { env: input.env },
+    );
+    const { stdout } = await execFileAsync(
+      batchExec?.command ?? input.executablePath,
+      batchExec?.args ?? ["auth", "status"],
       {
         ...(input.cwd ? { cwd: input.cwd } : {}),
-        env: input.env,
+        env: batchExec?.env ? { ...input.env, ...batchExec.env } : input.env,
         timeout: CLAUDE_AUTH_STATUS_TIMEOUT_MS,
+        ...(batchExec?.windowsVerbatimArguments ? { windowsVerbatimArguments: true } : {}),
       },
     );
     return parseClaudeAuthState(stdout);
@@ -236,10 +244,21 @@ export async function detectClaude(options?: {
 
   let stdout: string;
   try {
-    ({ stdout } = await execFileAsync(executablePath, ["--version"], {
-      ...(options?.cwd ? { cwd: options.cwd } : {}),
-      env: options?.env,
-    }));
+    const batchExec = resolveWindowsBatchCommand(
+      executablePath,
+      ["--version"],
+      process.platform,
+      { env: options?.env },
+    );
+    ({ stdout } = await execFileAsync(
+      batchExec?.command ?? executablePath,
+      batchExec?.args ?? ["--version"],
+      {
+        ...(options?.cwd ? { cwd: options.cwd } : {}),
+        env: batchExec?.env ? { ...options?.env, ...batchExec.env } : options?.env,
+        ...(batchExec?.windowsVerbatimArguments ? { windowsVerbatimArguments: true } : {}),
+      },
+    ));
   } catch (error) {
     return {
       authState: "unknown" as const,

@@ -68,6 +68,7 @@ const newCatalog = {
       id: "local:codex",
       name: "Codex",
       provider: "codex",
+      executablePath: "/resolved/bin/codex",
       availability: { status: "available", reasonCode: "", detail: "" },
     },
   ],
@@ -103,6 +104,7 @@ describe("Tutti agent catalog", () => {
         reasonCode: "kit_runtime_unavailable",
       },
     });
+    expect(catalog.agents[1]?.executablePath).toBe("/resolved/bin/codex");
     expect(catalog.agents.some((agent) => agent.providerId === "claude-code")).toBe(false);
   });
 

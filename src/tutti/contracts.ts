@@ -15,6 +15,7 @@ export interface TuttiAgentProviderCatalogEntry {
   providerId: string;
   displayName: string;
   agentTargetId?: string;
+  executablePath?: string;
   availability: TuttiAgentProviderAvailability;
   runtimeSupported: boolean;
 }
@@ -25,6 +26,7 @@ export interface TuttiAgentCatalogEntry {
   agentTargetId: string;
   providerId: string;
   displayName: string;
+  executablePath?: string;
   availability: TuttiAgentProviderAvailability;
   runtimeSupported: boolean;
 }
@@ -136,6 +138,7 @@ function isAgentCatalogEntry(value: unknown) {
     isNonEmptyString(value.agentTargetId) &&
     isCanonicalProviderId(value.providerId) &&
     isNonEmptyString(value.displayName) &&
+    (value.executablePath === undefined || isNonEmptyString(value.executablePath)) &&
     typeof value.runtimeSupported === "boolean" &&
     isAvailability(value.availability)
   );
@@ -147,6 +150,7 @@ function isProviderCatalogEntry(value: unknown) {
     isCanonicalProviderId(value.providerId) &&
     isNonEmptyString(value.displayName) &&
     (value.agentTargetId === undefined || isNonEmptyString(value.agentTargetId)) &&
+    (value.executablePath === undefined || isNonEmptyString(value.executablePath)) &&
     typeof value.runtimeSupported === "boolean" &&
     isAvailability(value.availability)
   );

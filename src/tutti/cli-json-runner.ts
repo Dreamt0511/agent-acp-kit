@@ -1,6 +1,10 @@
 import { execFile } from "node:child_process";
 
 import type { DetectContext } from "../core/detection.js";
+import {
+  resolveWindowsBatchCommand,
+  type WindowsBatchResolved,
+} from "../process/windows-batch.js";
 import { projectTuttiCliChildProcess, redactTuttiCliChildProcessText } from "./child-process.js";
 
 const DEFAULT_TIMEOUT_MS = 10_000;
@@ -84,6 +88,26 @@ export function hasConfiguredTuttiCli(input: Omit<TuttiCliJsonRequest, "args">) 
   );
 }
 
+/**
+ * Resolves how to spawn the Tutti CLI command on Windows.
+ *
+ * Windows batch shims (for example the `tutti.cmd` / `tutti-dev.cmd` wrappers
+ * installed by the Tutti desktop shell) cannot be spawned directly:
+ * CreateProcess cannot execute batch files. This resolves the shim's real
+ * executable via the shared windows-batch resolver. Unknown batch files fail
+ * closed so arbitrary argv is never passed through cmd.exe parsing.
+ *
+ * All other platforms (macOS/Unix shell-script shims) and non-batch commands
+ * return `null`, keeping the direct no-shell execFile path unchanged.
+ */
+export function resolveTuttiCliBatchExecFile(
+  command: string,
+  args: string[],
+  platform: NodeJS.Platform = process.platform,
+): WindowsBatchResolved | null {
+  return resolveWindowsBatchCommand(command, args, platform);
+}
+
 export async function runTuttiCliJson(input: TuttiCliJsonRequest): Promise<unknown> {
   const cwd = normalizeOptionalString(input.cwd);
   const env = resolveTuttiCliRequestEnv(input);
@@ -147,17 +171,21 @@ async function execTuttiCli(input: {
   if (!input.command) {
     throw new TuttiIntegrationError("cli_execution_failed", "Tutti CLI command is not configured.");
   }
+  const batchExec = resolveTuttiCliBatchExecFile(input.command, input.args);
   return await new Promise<string>((resolve, reject) => {
     execFile(
-      input.command,
-      input.args,
+      batchExec?.command ?? input.command,
+      batchExec?.args ?? input.args,
       {
         ...(input.cwd ? { cwd: input.cwd } : {}),
         encoding: "utf8",
-        env: input.env,
+        env: batchExec?.env ? { ...input.env, ...batchExec.env } : input.env,
         maxBuffer: input.maxBuffer,
         ...(input.signal ? { signal: input.signal } : {}),
         timeout: input.timeoutMs,
+        // cmd.exe receives the already-quoted command string verbatim; Node's
+        // default quoting would double-escape it and cmd would misparse.
+        ...(batchExec?.windowsVerbatimArguments ? { windowsVerbatimArguments: true } : {}),
       },
       (error, stdout, stderr) => {
         if (error) {

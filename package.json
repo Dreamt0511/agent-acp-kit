@@ -1,6 +1,6 @@
 {
   "name": "@tutti-os/agent-acp-kit",
-  "version": "0.7.7",
+  "version": "0.7.8",
   "type": "module",
   "description": "ACP-oriented toolkit for detecting, launching, and streaming local coding agents.",
   "license": "Apache-2.0",
@@ -52,7 +52,7 @@
     "vitest": "^3.2.4"
   },
   "scripts": {
-    "build": "rm -rf dist && tsc --build tsconfig.json --force",
+    "build": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && tsc --build tsconfig.json --force",
     "dev": "tsc --build tsconfig.json --watch --preserveWatchOutput",
     "pack:check": "npm pack --dry-run",
     "test:packed-consumer": "pnpm build && node scripts/test-packed-consumer.mjs",

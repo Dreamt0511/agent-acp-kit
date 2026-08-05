@@ -7,6 +7,32 @@ import { promisify } from "node:util";
 import type { AgentModelOption } from "../../core/provider-plugin.js";
 import { redactSecrets } from "../../core/redaction.js";
 import { resolveCommandExecutable } from "../../process/command-resolver.js";
+import { resolveWindowsBatchCommand } from "../../process/windows-batch.js";
+
+function batchExecFileAsync(
+  executablePath: string,
+  args: string[],
+  options: Parameters<typeof execFileAsync>[2] = {},
+) {
+  const batchExec = resolveWindowsBatchCommand(
+    executablePath,
+    args,
+    process.platform,
+    { env: options?.env as NodeJS.ProcessEnv | undefined },
+  );
+  return execFileAsync(
+    batchExec?.command ?? executablePath,
+    batchExec?.args ?? args,
+    {
+      ...options,
+      encoding: "utf8",
+      env: batchExec?.env
+        ? { ...(options?.env as NodeJS.ProcessEnv | undefined), ...batchExec.env }
+        : options?.env,
+      ...(batchExec?.windowsVerbatimArguments ? { windowsVerbatimArguments: true } : {}),
+    },
+  );
+}
 
 const execFileAsync = promisify(execFile);
 const CODEX_MODEL_DISCOVERY_TIMEOUT_MS = 5_000;
@@ -36,7 +62,7 @@ async function detectCodexAuthState(options: {
   executablePath: string;
 }) {
   try {
-    const result = await execFileAsync(
+    const result = await batchExecFileAsync(
       options.executablePath,
       ["login", "status"],
       {
@@ -174,10 +200,21 @@ async function loadCodexAppServerModelCatalog(
   env: NodeJS.ProcessEnv | undefined,
   cwd: string | undefined,
 ) {
-  const child = spawn(executablePath, ["app-server"], {
+  const batchExec = resolveWindowsBatchCommand(
+    executablePath,
+    ["app-server"],
+    process.platform,
+    { env },
+  );
+  const child = spawn(batchExec?.command ?? executablePath, batchExec?.args ?? ["app-server"], {
     ...(cwd ? { cwd } : {}),
-    ...(env ? { env } : {}),
+    ...(batchExec?.env
+      ? { env: { ...env, ...batchExec.env } }
+      : env
+        ? { env }
+        : {}),
     stdio: ["pipe", "pipe", "pipe"],
+    ...(batchExec?.windowsVerbatimArguments ? { windowsVerbatimArguments: true } : {}),
   });
   const rl = readline.createInterface({ input: child.stdout });
   const pending = new Map<
@@ -291,7 +328,7 @@ async function loadCodexDebugModelCatalog(
   env: NodeJS.ProcessEnv | undefined,
   cwd: string | undefined,
 ) {
-  const { stdout } = await execFileAsync(executablePath, ["debug", "models"], {
+  const { stdout } = await batchExecFileAsync(executablePath, ["debug", "models"], {
     ...(cwd ? { cwd } : {}),
     ...(env ? { env } : {}),
     maxBuffer: CODEX_MODEL_DISCOVERY_MAX_BUFFER,
@@ -365,7 +402,7 @@ export async function detectCodex(options?: {
 
   let stdout: string;
   try {
-    ({ stdout } = await execFileAsync(executablePath, ["--version"], {
+    ({ stdout } = await batchExecFileAsync(executablePath, ["--version"], {
       ...(options?.cwd ? { cwd: options.cwd } : {}),
       env: options?.env,
     }));

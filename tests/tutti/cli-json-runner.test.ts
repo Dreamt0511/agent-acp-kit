@@ -3,7 +3,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { hasConfiguredTuttiCli, runTuttiCliJson } from "../../src/tutti/cli-json-runner.js";
+import {
+  hasConfiguredTuttiCli,
+  resolveTuttiCliBatchExecFile,
+  runTuttiCliJson,
+} from "../../src/tutti/cli-json-runner.js";
 import {
   projectTuttiCliChildProcess,
   redactTuttiCliChildProcessText,
@@ -15,6 +19,18 @@ async function executable(source: string) {
   const dir = await mkdtemp(join(tmpdir(), "agent-acp-kit-tutti-cli-"));
   cleanup.push(dir);
   const file = join(dir, "tutti-test");
+  if (process.platform === "win32") {
+    // Windows cannot spawn shebang scripts directly; wrap the script in a
+    // .cmd shim so tests exercise the real batch-shim execution path.
+    const cmd = `${file}.cmd`;
+    await writeFile(
+      cmd,
+      `@echo off\r\n"${process.execPath}" "${file}" %*\r\n`,
+      "utf8",
+    );
+    await writeFile(file, `#!/usr/bin/env node\n${source}\n`, "utf8");
+    return cmd;
+  }
   await writeFile(file, `#!/usr/bin/env node\n${source}\n`, "utf8");
   await chmod(file, 0o755);
   return file;
@@ -199,6 +215,65 @@ describe("runTuttiCliJson", () => {
       details: { stderr: "app-cli failed credential=[REDACTED]" },
     });
     expect(JSON.stringify(error)).not.toContain(credential);
+  });
+
+  it("fails closed for an unknown Windows batch shim", () => {
+    expect(() =>
+      resolveTuttiCliBatchExecFile(
+        "C:\\Program Files\\Tutti\\state\\bin\\tutti.cmd",
+        ["--agent-id", "my agent id", "--model", "a&b%c"],
+        "win32",
+      ),
+    ).toThrow("Unsupported Windows batch shim");
+  });
+
+  it("resolves a Windows .cmd shim to its real executable when parseable", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "agent-acp-kit-tutti-shim-"));
+    cleanup.push(dir);
+    const shim = join(dir, "tutti.cmd");
+    const target = join(dir, "tutti-dev.exe");
+    await writeFile(shim, `@echo off\r\n"${target}" %*\r\n`, "utf8");
+    await writeFile(target, "placeholder", "utf8");
+
+    expect(
+      resolveTuttiCliBatchExecFile(shim, ["--json", "agent", "list"], "win32"),
+    ).toMatchObject({
+      command: target,
+      args: ["--json", "agent", "list"],
+    });
+  });
+
+  it("matches Windows batch shims case-insensitively", () => {
+    expect(() => resolveTuttiCliBatchExecFile("TUTTI.CMD", [], "win32"))
+      .toThrow("Unsupported Windows batch shim");
+  });
+
+  it("leaves non-batch Windows commands on the direct execFile path", () => {
+    expect(resolveTuttiCliBatchExecFile("tutti.exe", ["--json"], "win32")).toBeNull();
+    expect(resolveTuttiCliBatchExecFile("tutti", ["--json"], "win32")).toBeNull();
+    expect(resolveTuttiCliBatchExecFile("cmd.exe", [], "win32")).toBeNull();
+  });
+
+  it("never wraps commands on macOS or Linux, keeping the direct path intact", () => {
+    expect(
+      resolveTuttiCliBatchExecFile(
+        "/Users/test/.local/share/tutti/bin/tutti",
+        ["--json", "agent", "list"],
+        "darwin",
+      ),
+    ).toBeNull();
+    expect(
+      resolveTuttiCliBatchExecFile("/usr/local/bin/tutti.cmd", [], "linux"),
+    ).toBeNull();
+  });
+
+  it("executes a supported Windows shim safely and a plain script elsewhere", async () => {
+    const command = await executable(
+      `process.stdout.write(JSON.stringify({ argv: process.argv.slice(2) }));`,
+    );
+    await expect(
+      runTuttiCliJson({ command, args: ["--json", "agent", "list"] }),
+    ).resolves.toEqual({ argv: ["--json", "agent", "list"] });
   });
 
   it("classifies malformed JSON", async () => {

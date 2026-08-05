@@ -1,9 +1,30 @@
 import type { AgentEvent } from "../../core/events.js";
 import type { AgentRunParams, ProviderLaunchPlan } from "../../core/provider-plugin.js";
+import { terminateProcessTree } from "../../process/cancellation.js";
 import { spawnSupervisedProcess } from "../../process/supervisor.js";
 import { createJsonRpcLineParser, sendJsonRpc } from "./acp-jsonrpc.js";
 import { choosePermissionOutcome } from "./acp-permissions.js";
 import { buildAcpSessionNewParams } from "./acp-session.js";
+
+const DEFAULT_ACP_REQUEST_TIMEOUT_MS = 15_000;
+const DEFAULT_ACP_SESSION_NEW_TIMEOUT_MS = 30_000;
+const DEFAULT_ACP_SESSION_PROMPT_TIMEOUT_MS = 30 * 60_000;
+
+export function resolveAcpRequestTimeoutMs(
+  method: string,
+  paramsTimeoutMs?: number,
+  planTimeoutMs?: number,
+) {
+  return (
+    paramsTimeoutMs ??
+    planTimeoutMs ??
+    (method === "session/prompt"
+      ? DEFAULT_ACP_SESSION_PROMPT_TIMEOUT_MS
+      : method === "session/new"
+        ? DEFAULT_ACP_SESSION_NEW_TIMEOUT_MS
+        : DEFAULT_ACP_REQUEST_TIMEOUT_MS)
+  );
+}
 
 type AcpToolCallState = {
   name: string;
@@ -257,7 +278,11 @@ export async function* runAcpTransport(
 
   function sendRequest(method: string, requestParams?: unknown) {
     const id = nextId++;
-    const timeoutMs = params.timeoutMs ?? plan.timeoutMs ?? 15_000;
+    const timeoutMs = resolveAcpRequestTimeoutMs(
+      method,
+      params.timeoutMs,
+      plan.timeoutMs,
+    );
     const promise = new Promise<unknown>((resolve, reject) => {
       const timer = setTimeout(() => {
         pending.delete(id);
@@ -354,7 +379,7 @@ export async function* runAcpTransport(
         message,
       });
       failPending(new Error(message));
-      processHandle.child.kill();
+      terminateProcessTree(processHandle.child, "SIGTERM");
     }
   });
   processHandle.child.stderr.on("data", (chunk: string) => {
@@ -368,8 +393,7 @@ export async function* runAcpTransport(
       promptCompleted &&
       transportClosedProcess &&
       !params.signal?.aborted &&
-      !timedOut &&
-      (signal != null || code === 143 || code === 137);
+      !timedOut;
     if (pending.size > 0) {
       failPending(
         new Error(
@@ -386,7 +410,12 @@ export async function* runAcpTransport(
         code: "process_timeout",
         message: `ACP process timed out after ${plan.timeoutMs}ms.`,
       });
-    } else if (code && code !== 0 && !completedByClientShutdown) {
+    } else if (
+      code &&
+      code !== 0 &&
+      !completedByClientShutdown &&
+      !params.signal?.aborted
+    ) {
       const stderrTail = processHandle.stderr.tail().trim();
       queue.push({
         type: "error",
@@ -400,8 +429,12 @@ export async function* runAcpTransport(
     const failed =
       fatalError ||
       timedOut ||
-      (!completedByClientShutdown && code != null && code !== 0);
-    const canceled = signal != null && !failed && !completedByClientShutdown;
+      (!params.signal?.aborted &&
+        !completedByClientShutdown &&
+        code != null &&
+        code !== 0);
+    const canceled =
+      params.signal?.aborted === true && !fatalError && !timedOut;
     queue.push({
       type: "done",
       status: canceled ? "canceled" : failed ? "failed" : "completed",
@@ -471,13 +504,13 @@ export async function* runAcpTransport(
           processHandle.child.signalCode === null
         ) {
           transportClosedProcess = true;
-          processHandle.child.kill("SIGTERM");
+          terminateProcessTree(processHandle.child, "SIGTERM");
           promptKillFallbackTimer = setTimeout(() => {
             if (
               processHandle.child.exitCode === null &&
               processHandle.child.signalCode === null
             ) {
-              processHandle.child.kill("SIGKILL");
+              terminateProcessTree(processHandle.child, "SIGKILL");
             }
           }, 2_000);
         }
@@ -489,7 +522,7 @@ export async function* runAcpTransport(
         code: "acp_lifecycle_failed",
         message: error instanceof Error ? error.message : "ACP lifecycle failed.",
       });
-      processHandle.child.kill();
+      terminateProcessTree(processHandle.child, "SIGTERM");
     } finally {
       lifecycleSettled = true;
     }

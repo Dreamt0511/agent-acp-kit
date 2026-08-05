@@ -28,6 +28,7 @@ function catalog() {
         id: "team:writer",
         name: "Writer",
         provider: "codex",
+        executablePath: "/resolved/bin/codex",
         availability: { status: "available", reasonCode: "", detail: "" },
       },
       {
@@ -263,10 +264,31 @@ describe("Tutti-aware runtime integration", () => {
       },
     });
     expect(prepared).toMatchObject({
+      executablePath: "/resolved/bin/codex",
       model: "writer-model",
       reasoning: "high",
     });
     expect(prepared).not.toHaveProperty("permission");
+  });
+
+  it("keeps the provider fallback when the catalog has no resolved executable", async () => {
+    const integration = createTuttiRuntimeIntegration({
+      runTuttiCli: async (args) =>
+        args.includes("list") ? catalog() : composer("team:reviewer"),
+    });
+    const prepared = await integration.prepareRun({
+      descriptors,
+      env: { TUTTI_CLI: "/usr/bin/tutti-cli" },
+      run: {
+        agentTargetId: "team:reviewer",
+        runId: "run-provider-fallback",
+        provider: "codex",
+        cwd: "/workspace/project",
+        prompt: "hello",
+      },
+    });
+
+    expect(prepared).not.toHaveProperty("executablePath");
   });
 
   it("preserves an explicit run permission instead of replacing it with the permission UI default", async () => {

@@ -93,6 +93,22 @@ describe("resolveWindowsBatchCommand", () => {
     ).toThrow("Unsupported Windows batch shim");
   });
 
+  it.each([
+    ["cmd.exe", "/c run-agent"],
+    ["pwsh.exe", '-NoProfile -Command "run-agent"'],
+  ])("rejects shell-interpreter launchers through %s", (shellName, prefix) => {
+    const dir = mkdtempSync(join(tmpdir(), "agent-acp-kit-shell-command-"));
+    tempDirs.push(dir);
+    const shell = join(dir, shellName);
+    const shim = join(dir, "unsafe.cmd");
+    writeFileSync(shell, "");
+    writeFileSync(shim, `"${shell}" ${prefix} %*\r\n`);
+
+    expect(() =>
+      resolveWindowsBatchCommand(shim, ["a&b"], "win32"),
+    ).toThrow("Unsupported Windows batch shim");
+  });
+
   it.runIf(process.platform === "win32")(
     "resolves a PowerShell file launcher without invoking cmd.exe",
     () => {

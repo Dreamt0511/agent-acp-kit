@@ -112,9 +112,6 @@ function resolveDirectShimLine(
     .replace(/^@/u, "")
     .trim();
   if (/[&|<>()]/u.test(commandPrefix)) return null;
-  if (/powershell\.exe/i.test(commandPrefix)) {
-    return null;
-  }
   const tokens = Array.from(
     commandPrefix.matchAll(/"([^"]*)"|([^\s"]+)/g),
     (match) => (match[1] ?? match[2] ?? "").trim(),
@@ -125,6 +122,13 @@ function resolveDirectShimLine(
   const expandedCommand = expandBatchToken(commandToken, shimDir, env);
   if (!expandedCommand) return null;
   const command = normalize(expandedCommand);
+  if (
+    new Set(["cmd.exe", "command.com", "powershell.exe", "pwsh.exe"]).has(
+      basename(command).toLowerCase(),
+    )
+  ) {
+    return null;
+  }
   if (!/\.(?:exe|com)$/i.test(command) || !existsSync(command)) {
     return null;
   }

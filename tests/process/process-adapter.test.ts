@@ -57,4 +57,25 @@ describe("resolveProcessInvocation", () => {
       }),
     ).toMatchObject({ command: override, args: ["--version"] });
   });
+
+  it("resolves an explicit batch command name from PATH", () => {
+    const dir = mkdtempSync(join(tmpdir(), "agent-acp-kit-process-path-"));
+    tempDirs.push(dir);
+    const shim = join(dir, "agent.cmd");
+    const node = join(dir, "node.exe");
+    const cliPath = join(dir, "cli.js");
+    writeFileSync(node, "");
+    writeFileSync(cliPath, "");
+    writeFileSync(shim, `@"${node}" "${cliPath}" %*\r\n`);
+    chmodSync(shim, 0o755);
+
+    expect(
+      resolveProcessInvocation({
+        command: "agent.cmd",
+        args: ["--version"],
+        env: { PATH: dir, PATHEXT: ".CMD;.EXE" },
+        platform: "win32",
+      }),
+    ).toMatchObject({ command: node, args: [cliPath, "--version"] });
+  });
 });

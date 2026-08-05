@@ -21,31 +21,23 @@ export function resolveProcessInvocation(input: {
 }): ProcessInvocation {
   const env = input.env ?? process.env;
   const platform = input.platform ?? process.platform;
-  if (!input.overridePath && isWindowsBatchShim(input.command, platform)) {
-    const batch = resolveWindowsBatchCommand(
-      input.command,
-      input.args,
+  let command: string;
+  try {
+    command = resolveCommandExecutableSync({
+      command: input.command,
+      env,
+      ...(input.fallbackCommands
+        ? { fallbackCommands: input.fallbackCommands }
+        : {}),
+      ...(input.overridePath ? { overridePath: input.overridePath } : {}),
       platform,
-      { env },
-    );
-    if (!batch) {
+    });
+  } catch (error) {
+    if (!input.overridePath && isWindowsBatchShim(input.command, platform)) {
       throw new Error(`Unsupported Windows batch shim: ${input.command}`);
     }
-    return {
-      command: batch.command,
-      args: batch.args,
-      env: batch.env ? { ...env, ...batch.env } : env,
-    };
+    throw error;
   }
-  const command = resolveCommandExecutableSync({
-    command: input.command,
-    env,
-    ...(input.fallbackCommands
-      ? { fallbackCommands: input.fallbackCommands }
-      : {}),
-    ...(input.overridePath ? { overridePath: input.overridePath } : {}),
-    platform,
-  });
   if (isWindowsBatchShim(command, platform)) {
     const batch = resolveWindowsBatchCommand(
       command,

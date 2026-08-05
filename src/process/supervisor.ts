@@ -1,13 +1,9 @@
-import {
-  spawn,
-  type ChildProcessWithoutNullStreams,
-} from "node:child_process";
+import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 
 import { attachAbortSignal, terminateProcessTree } from "./cancellation.js";
-import { resolveCommandExecutableSync } from "./command-resolver.js";
 import { mergeProcessEnv } from "./env.js";
+import { resolveProcessInvocation } from "./process-adapter.js";
 import { StderrBuffer } from "./stderr-buffer.js";
-import { resolveWindowsBatchCommand } from "./windows-batch.js";
 
 export type SupervisedProcess = {
   child: ChildProcessWithoutNullStreams;
@@ -42,25 +38,19 @@ export function spawnSupervisedProcess(input: {
       ...(input.redactionSecrets ?? []),
     ].filter(Boolean),
   );
-  const command = resolveCommandExecutableSync({
+  const invocation = resolveProcessInvocation({
     command: input.command,
+    args: input.args,
     env,
-    ...(input.fallbackCommands ? { fallbackCommands: input.fallbackCommands } : {}),
+    ...(input.fallbackCommands
+      ? { fallbackCommands: input.fallbackCommands }
+      : {}),
     ...(input.overridePath ? { overridePath: input.overridePath } : {}),
   });
-  const batchExec = resolveWindowsBatchCommand(
-    command,
-    input.args,
-    process.platform,
-    { env },
-  );
-  const child = spawn(batchExec?.command ?? command, batchExec?.args ?? input.args, {
+  const child = spawn(invocation.command, invocation.args, {
     cwd: input.cwd,
-    env: batchExec?.env ? { ...env, ...batchExec.env } : env,
+    env: invocation.env,
     stdio: ["pipe", "pipe", "pipe"],
-    ...(batchExec?.windowsVerbatimArguments
-      ? { windowsVerbatimArguments: true }
-      : {}),
   });
   let timedOut = false;
   let timeout: NodeJS.Timeout | undefined;
@@ -78,11 +68,11 @@ export function spawnSupervisedProcess(input: {
   if (input.timeoutMs && input.timeoutMs > 0) {
     timeout = setTimeout(() => {
       timedOut = true;
-      if (!child.killed) {
+      if (child.exitCode === null && child.signalCode === null) {
         terminateProcessTree(child, "SIGTERM");
       }
       killFallback = setTimeout(() => {
-        if (!child.killed) {
+        if (child.exitCode === null && child.signalCode === null) {
           terminateProcessTree(child, "SIGKILL");
         }
       }, input.killAfterMs ?? 2_000);

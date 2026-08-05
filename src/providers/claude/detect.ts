@@ -6,7 +6,7 @@ import { promisify } from "node:util";
 import type { AgentModelOption } from "../../core/provider-plugin.js";
 import { redactSecrets } from "../../core/redaction.js";
 import { resolveCommandExecutable } from "../../process/command-resolver.js";
-import { resolveWindowsBatchCommand } from "../../process/windows-batch.js";
+import { resolveProcessInvocation } from "../../process/process-adapter.js";
 
 const execFileAsync = promisify(execFile);
 const CLAUDE_MODEL_DISCOVERY_TIMEOUT_MS = 8_000;
@@ -75,20 +75,19 @@ export async function detectClaudeAuthState(input: {
   executablePath: string;
 }) {
   try {
-    const batchExec = resolveWindowsBatchCommand(
-      input.executablePath,
-      ["auth", "status"],
-      process.platform,
-      { env: input.env },
-    );
+    const invocation = resolveProcessInvocation({
+      command: input.executablePath,
+      args: ["auth", "status"],
+      env: input.env,
+      overridePath: input.executablePath,
+    });
     const { stdout } = await execFileAsync(
-      batchExec?.command ?? input.executablePath,
-      batchExec?.args ?? ["auth", "status"],
+      invocation.command,
+      invocation.args,
       {
         ...(input.cwd ? { cwd: input.cwd } : {}),
-        env: batchExec?.env ? { ...input.env, ...batchExec.env } : input.env,
+        env: invocation.env,
         timeout: CLAUDE_AUTH_STATUS_TIMEOUT_MS,
-        ...(batchExec?.windowsVerbatimArguments ? { windowsVerbatimArguments: true } : {}),
       },
     );
     return parseClaudeAuthState(stdout);
@@ -244,21 +243,16 @@ export async function detectClaude(options?: {
 
   let stdout: string;
   try {
-    const batchExec = resolveWindowsBatchCommand(
-      executablePath,
-      ["--version"],
-      process.platform,
-      { env: options?.env },
-    );
-    ({ stdout } = await execFileAsync(
-      batchExec?.command ?? executablePath,
-      batchExec?.args ?? ["--version"],
-      {
-        ...(options?.cwd ? { cwd: options.cwd } : {}),
-        env: batchExec?.env ? { ...options?.env, ...batchExec.env } : options?.env,
-        ...(batchExec?.windowsVerbatimArguments ? { windowsVerbatimArguments: true } : {}),
-      },
-    ));
+    const invocation = resolveProcessInvocation({
+      command: executablePath,
+      args: ["--version"],
+      env: options?.env,
+      overridePath: executablePath,
+    });
+    ({ stdout } = await execFileAsync(invocation.command, invocation.args, {
+      ...(options?.cwd ? { cwd: options.cwd } : {}),
+      env: invocation.env,
+    }));
   } catch (error) {
     return {
       authState: "unknown" as const,

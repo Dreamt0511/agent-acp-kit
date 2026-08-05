@@ -88,6 +88,8 @@ Use subpath exports for specialized surfaces:
 - `./tutti` for server-side auto CLI-backed/standalone catalog, composer, and skill integration.
 - `./tutti/contracts` for browser-safe Tutti DTO types and guards with no Node imports.
 - `./runtime-control-plane` for runtime selection/control-plane helpers.
+- `./process-adapter` for the narrow cross-platform invocation resolver used by
+  hosts that intentionally execute an Agent CLI outside the runtime facade.
 - `./testing` for fake providers, fake ACP peers, fixtures, and conformance helpers.
 
 Avoid exporting provider internals, launch-plan helpers, parser internals, or application-specific glue from the root.

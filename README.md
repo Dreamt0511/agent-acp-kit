@@ -147,27 +147,21 @@ for await (const event of runtime.run({
 Tutti apps keep platform integration behind `@tutti-os/agent-acp-kit/tutti` and keep actual Agent execution in an app-owned local runtime:
 
 ```ts
-import {
-  createDefaultLocalAgentRuntime,
-} from "@tutti-os/agent-acp-kit";
-import {
-  loadTuttiAgentSkillContext,
-} from "@tutti-os/agent-acp-kit/tutti";
+import { createDefaultLocalAgentRuntime } from "@tutti-os/agent-acp-kit";
+import { loadTuttiAgentSkillContext } from "@tutti-os/agent-acp-kit/tutti";
 
 const runtime = createDefaultLocalAgentRuntime();
 const projectCwd = await resolveAppLocalProjectCwd(projectId);
 const detectContext = { cwd: projectCwd };
 const agents = await runtime.detect(detectContext);
 const agent =
-  agents.find(
-    (item) =>
-      item.isDefault && item.supported,
-  ) ??
+  agents.find((item) => item.isDefault && item.supported) ??
   agents.find((item) => item.supported);
 if (!agent) {
   throw new Error("No local Agent is currently available.");
 }
-if (!agent.agentTargetId) throw new Error("Selected Agent has no target identity.");
+if (!agent.agentTargetId)
+  throw new Error("Selected Agent has no target identity.");
 const skills = await loadTuttiAgentSkillContext({
   agentTargetId: agent.agentTargetId,
   agentSessionId: runId,
@@ -211,6 +205,10 @@ older catalogs and standalone hosts continue to use provider-native discovery.
 On Windows, process launch resolves native executables, npm/node shims, and
 PowerShell `-File` shims without routing Agent arguments through `cmd.exe`;
 unknown batch programs fail closed.
+Node hosts that intentionally execute an Agent CLI outside the normal runtime
+may use `resolveProcessInvocation` from the specialized
+`@tutti-os/agent-acp-kit/process-adapter` export. Windows batch parsing remains
+private to that adapter and is not exported from the package root.
 Composer permission defaults are UI presentation state and do not override an
 autonomous Workspace App run. Permission comes only from an explicit
 `AgentRunInput.permission` selection or the SDK autonomous default described
@@ -257,24 +255,24 @@ import {
 
 ## Provider Support
 
-| Provider                    | Status       | Transport                               | Notes                                                                                                                                                                                                                                                   |
-| --------------------------- | ------------ | --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Codex                       | Supported    | `codex exec --json` JSONL               | Dynamic model discovery via `codex debug models`; per-run `CODEX_HOME` with copied auth and sanitized config; same-provider resume via `codex exec resume --json <session> -`                                                                           |
-| Claude Code (`claude-code`) | Supported    | `claude -p --output-format stream-json` | Canonical provider ID is `claude-code`; legacy `claude` input is accepted internally; supports fallback model hints, custom model pass-through, and same-provider resume via `--resume <session>`                                                       |
+| Provider                    | Status       | Transport                               | Notes                                                                                                                                                                                             |
+| --------------------------- | ------------ | --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Codex                       | Supported    | `codex exec --json` JSONL               | Dynamic model discovery via `codex debug models`; per-run `CODEX_HOME` with copied auth and sanitized config; same-provider resume via `codex exec resume --json <session> -`                     |
+| Claude Code (`claude-code`) | Supported    | `claude -p --output-format stream-json` | Canonical provider ID is `claude-code`; legacy `claude` input is accepted internally; supports fallback model hints, custom model pass-through, and same-provider resume via `--resume <session>` |
 | Tutti Agent (`tutti-agent`) | Supported    | `tutti-agent exec --json` JSONL         | First-party canonical provider; runs use a temporary `TUTTI_AGENT_HOME` derived from the VM-local source Home; authentication is probed with `tutti-agent login status`; no Nexight runtime alias |
-| Devin for Terminal          | Experimental | ACP JSON-RPC                            | Shared generic ACP transport; command override `DEVIN_ACP_BIN`                                                                                                                                                                                          |
-| Hermes                      | Experimental | ACP JSON-RPC                            | Shared generic ACP transport; command override `HERMES_ACP_BIN`                                                                                                                                                                                         |
-| Kimi                        | Experimental | ACP JSON-RPC                            | Shared generic ACP transport; command override `KIMI_ACP_BIN`                                                                                                                                                                                           |
-| Kiro                        | Experimental | ACP JSON-RPC                            | Shared generic ACP transport; command override `KIRO_ACP_BIN`                                                                                                                                                                                           |
-| Kilo                        | Experimental | ACP JSON-RPC                            | Shared generic ACP transport; command override `KILO_ACP_BIN`                                                                                                                                                                                           |
-| Mistral Vibe                | Experimental | ACP JSON-RPC                            | Shared generic ACP transport; command override `VIBE_ACP_BIN`                                                                                                                                                                                           |
-| Cursor Agent                | Experimental | ACP JSON-RPC                            | Shared generic ACP transport with run-scoped selected skills; command override `CURSOR_ACP_BIN`                                                                                                                                                         |
-| Gemini CLI                  | Experimental | ACP JSON-RPC                            | Shared generic ACP transport; command override `GEMINI_ACP_BIN`                                                                                                                                                                                         |
-| OpenCode                    | Experimental | ACP JSON-RPC                            | Shared generic ACP transport with run-scoped selected skills; command override `OPENCODE_ACP_BIN`                                                                                                                                                       |
-| Qoder CLI                   | Experimental | ACP JSON-RPC                            | Shared generic ACP transport; command override `QODER_ACP_BIN`                                                                                                                                                                                          |
-| Qwen Code                   | Experimental | ACP JSON-RPC                            | Shared generic ACP transport; command override `QWEN_ACP_BIN`                                                                                                                                                                                           |
-| Generic ACP                 | Experimental | ACP JSON-RPC                            | Bring your own ACP agent command                                                                                                                                                                                                                        |
-| Fake                        | Test helper  | In-memory async events                  | For host tests and conformance checks                                                                                                                                                                                                                   |
+| Devin for Terminal          | Experimental | ACP JSON-RPC                            | Shared generic ACP transport; command override `DEVIN_ACP_BIN`                                                                                                                                    |
+| Hermes                      | Experimental | ACP JSON-RPC                            | Shared generic ACP transport; command override `HERMES_ACP_BIN`                                                                                                                                   |
+| Kimi                        | Experimental | ACP JSON-RPC                            | Shared generic ACP transport; command override `KIMI_ACP_BIN`                                                                                                                                     |
+| Kiro                        | Experimental | ACP JSON-RPC                            | Shared generic ACP transport; command override `KIRO_ACP_BIN`                                                                                                                                     |
+| Kilo                        | Experimental | ACP JSON-RPC                            | Shared generic ACP transport; command override `KILO_ACP_BIN`                                                                                                                                     |
+| Mistral Vibe                | Experimental | ACP JSON-RPC                            | Shared generic ACP transport; command override `VIBE_ACP_BIN`                                                                                                                                     |
+| Cursor Agent                | Experimental | ACP JSON-RPC                            | Shared generic ACP transport with run-scoped selected skills; command override `CURSOR_ACP_BIN`                                                                                                   |
+| Gemini CLI                  | Experimental | ACP JSON-RPC                            | Shared generic ACP transport; command override `GEMINI_ACP_BIN`                                                                                                                                   |
+| OpenCode                    | Experimental | ACP JSON-RPC                            | Shared generic ACP transport with run-scoped selected skills; command override `OPENCODE_ACP_BIN`                                                                                                 |
+| Qoder CLI                   | Experimental | ACP JSON-RPC                            | Shared generic ACP transport; command override `QODER_ACP_BIN`                                                                                                                                    |
+| Qwen Code                   | Experimental | ACP JSON-RPC                            | Shared generic ACP transport; command override `QWEN_ACP_BIN`                                                                                                                                     |
+| Generic ACP                 | Experimental | ACP JSON-RPC                            | Bring your own ACP agent command                                                                                                                                                                  |
+| Fake                        | Test helper  | In-memory async events                  | For host tests and conformance checks                                                                                                                                                             |
 
 Built-in real local providers do not impose a provider-level concurrency cap. Hosts can still enforce stricter queueing, cancellation, or watchdog policies around `runtime.run()` when a product surface needs serialized execution.
 

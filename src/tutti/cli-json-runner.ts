@@ -2,10 +2,13 @@ import { execFile } from "node:child_process";
 
 import type { DetectContext } from "../core/detection.js";
 import {
-  resolveWindowsBatchCommand,
-  type WindowsBatchResolved,
-} from "../process/windows-batch.js";
-import { projectTuttiCliChildProcess, redactTuttiCliChildProcessText } from "./child-process.js";
+  resolveProcessInvocation,
+  type ProcessInvocation,
+} from "../process/process-adapter.js";
+import {
+  projectTuttiCliChildProcess,
+  redactTuttiCliChildProcessText,
+} from "./child-process.js";
 
 const DEFAULT_TIMEOUT_MS = 10_000;
 const DEFAULT_MAX_BUFFER = 1024 * 1024;
@@ -51,7 +54,9 @@ export interface ResolveTuttiCliCommandInput {
   envNames?: string[];
 }
 
-export function resolveTuttiCliCommand(input: ResolveTuttiCliCommandInput = {}): string {
+export function resolveTuttiCliCommand(
+  input: ResolveTuttiCliCommandInput = {},
+): string {
   const env = input.env ?? process.env;
   for (const name of [...(input.envNames ?? []), "TUTTI_CLI"]) {
     const value = env[name]?.trim();
@@ -79,7 +84,9 @@ function resolveTuttiCliRequestEnv(
   return input.env;
 }
 
-export function hasConfiguredTuttiCli(input: Omit<TuttiCliJsonRequest, "args">) {
+export function hasConfiguredTuttiCli(
+  input: Omit<TuttiCliJsonRequest, "args">,
+) {
   const env = resolveTuttiCliRequestEnv(input);
   return Boolean(
     input.runTuttiCli ||
@@ -100,15 +107,18 @@ export function hasConfiguredTuttiCli(input: Omit<TuttiCliJsonRequest, "args">) 
  * All other platforms (macOS/Unix shell-script shims) and non-batch commands
  * return `null`, keeping the direct no-shell execFile path unchanged.
  */
-export function resolveTuttiCliBatchExecFile(
+export function resolveTuttiCliInvocation(
   command: string,
   args: string[],
   platform: NodeJS.Platform = process.platform,
-): WindowsBatchResolved | null {
-  return resolveWindowsBatchCommand(command, args, platform);
+  env?: NodeJS.ProcessEnv,
+): ProcessInvocation {
+  return resolveProcessInvocation({ command, args, platform, env });
 }
 
-export async function runTuttiCliJson(input: TuttiCliJsonRequest): Promise<unknown> {
+export async function runTuttiCliJson(
+  input: TuttiCliJsonRequest,
+): Promise<unknown> {
   const cwd = normalizeOptionalString(input.cwd);
   const env = resolveTuttiCliRequestEnv(input);
   const child = projectTuttiCliChildProcess({
@@ -140,21 +150,33 @@ export async function runTuttiCliJson(input: TuttiCliJsonRequest): Promise<unkno
     try {
       return JSON.parse(payload || "{}");
     } catch {
-      throw new TuttiIntegrationError("invalid_response", "Tutti CLI returned invalid JSON.");
+      throw new TuttiIntegrationError(
+        "invalid_response",
+        "Tutti CLI returned invalid JSON.",
+      );
     }
   } catch (error) {
     if (error instanceof TuttiIntegrationError) throw error;
     if (input.signal?.aborted) {
-      throw new TuttiIntegrationError("cli_aborted", "Tutti CLI request was aborted.");
+      throw new TuttiIntegrationError(
+        "cli_aborted",
+        "Tutti CLI request was aborted.",
+      );
     }
     const candidate = error as NodeJS.ErrnoException & {
       killed?: boolean;
       signal?: string;
     };
     if (candidate.killed && candidate.signal === "SIGTERM") {
-      throw new TuttiIntegrationError("cli_timeout", "Tutti CLI request timed out.");
+      throw new TuttiIntegrationError(
+        "cli_timeout",
+        "Tutti CLI request timed out.",
+      );
     }
-    throw new TuttiIntegrationError("cli_execution_failed", "Tutti CLI request failed.");
+    throw new TuttiIntegrationError(
+      "cli_execution_failed",
+      "Tutti CLI request failed.",
+    );
   }
 }
 
@@ -169,28 +191,39 @@ async function execTuttiCli(input: {
   timeoutMs: number;
 }) {
   if (!input.command) {
-    throw new TuttiIntegrationError("cli_execution_failed", "Tutti CLI command is not configured.");
+    throw new TuttiIntegrationError(
+      "cli_execution_failed",
+      "Tutti CLI command is not configured.",
+    );
   }
-  const batchExec = resolveTuttiCliBatchExecFile(input.command, input.args);
+  const invocation = resolveTuttiCliInvocation(
+    input.command,
+    input.args,
+    process.platform,
+    { ...input.env },
+  );
   return await new Promise<string>((resolve, reject) => {
     execFile(
-      batchExec?.command ?? input.command,
-      batchExec?.args ?? input.args,
+      invocation.command,
+      invocation.args,
       {
         ...(input.cwd ? { cwd: input.cwd } : {}),
         encoding: "utf8",
-        env: batchExec?.env ? { ...input.env, ...batchExec.env } : input.env,
+        env: invocation.env,
         maxBuffer: input.maxBuffer,
         ...(input.signal ? { signal: input.signal } : {}),
         timeout: input.timeoutMs,
-        // cmd.exe receives the already-quoted command string verbatim; Node's
-        // default quoting would double-escape it and cmd would misparse.
-        ...(batchExec?.windowsVerbatimArguments ? { windowsVerbatimArguments: true } : {}),
       },
       (error, stdout, stderr) => {
         if (error) {
           reject(
-            toTuttiCliExecutionError(error, stdout, stderr, input.redactionSecrets, input.signal),
+            toTuttiCliExecutionError(
+              error,
+              stdout,
+              stderr,
+              input.redactionSecrets,
+              input.signal,
+            ),
           );
           return;
         }
@@ -219,7 +252,11 @@ function toTuttiCliExecutionError(
     details.stderr = redactTuttiCliChildProcessText(stderr, redactionSecrets);
   }
   if (signal?.aborted) {
-    return new TuttiIntegrationError("cli_aborted", "Tutti CLI request was aborted.", details);
+    return new TuttiIntegrationError(
+      "cli_aborted",
+      "Tutti CLI request was aborted.",
+      details,
+    );
   }
   if (typeof error.code === "number" || typeof error.code === "string") {
     details.exitCode = error.code;
@@ -228,7 +265,11 @@ function toTuttiCliExecutionError(
     details.signal = error.signal;
   }
   if (error.killed && error.signal === "SIGTERM") {
-    return new TuttiIntegrationError("cli_timeout", "Tutti CLI request timed out.", details);
+    return new TuttiIntegrationError(
+      "cli_timeout",
+      "Tutti CLI request timed out.",
+      details,
+    );
   }
   if (isUnsupportedAgentListCommand(details.stderr)) {
     return new TuttiIntegrationError(
@@ -237,12 +278,17 @@ function toTuttiCliExecutionError(
       details,
     );
   }
-  return new TuttiIntegrationError("cli_execution_failed", "Tutti CLI request failed.", details);
+  return new TuttiIntegrationError(
+    "cli_execution_failed",
+    "Tutti CLI request failed.",
+    details,
+  );
 }
 
 function isUnsupportedAgentListCommand(stderr: unknown) {
   return (
-    typeof stderr === "string" && /(?:^|\n)unknown command:\s+agent list\s*(?:\n|$)/u.test(stderr)
+    typeof stderr === "string" &&
+    /(?:^|\n)unknown command:\s+agent list\s*(?:\n|$)/u.test(stderr)
   );
 }
 

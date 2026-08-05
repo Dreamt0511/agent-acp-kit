@@ -35,9 +35,12 @@ function getEnvValue(env: NodeJS.ProcessEnv | undefined, key: string) {
   return match ? env[match] : undefined;
 }
 
-function getSearchPath(env: NodeJS.ProcessEnv | undefined) {
+function getSearchPath(
+  env: NodeJS.ProcessEnv | undefined,
+  platform: NodeJS.Platform = process.platform,
+) {
   const inherited = getEnvValue(env, "PATH") ?? process.env.PATH ?? "";
-  if (process.platform !== "win32") return inherited;
+  if (platform !== "win32") return inherited;
 
   const appData = getEnvValue(env, "APPDATA");
   const localAppData = getEnvValue(env, "LOCALAPPDATA");
@@ -96,15 +99,21 @@ export async function resolveCommandExecutable(input: {
   env?: NodeJS.ProcessEnv;
   fallbackCommands?: string[];
   overridePath?: string;
+  platform?: NodeJS.Platform;
 }) {
   if (input.overridePath) {
     return input.overridePath;
   }
 
   const commands = getCandidates(input);
+  const platform = input.platform ?? process.platform;
   for (const command of commands) {
     if (isAbsolute(command)) {
-      for (const candidate of withWindowsExecutableExtensions(command, process.platform, input.env)) {
+      for (const candidate of withWindowsExecutableExtensions(
+        command,
+        platform,
+        input.env,
+      )) {
         if (await isExecutable(candidate)) {
           return candidate;
         }
@@ -112,9 +121,13 @@ export async function resolveCommandExecutable(input: {
       continue;
     }
 
-    const pathValue = getSearchPath(input.env);
+    const pathValue = getSearchPath(input.env, platform);
     for (const part of pathValue.split(delimiter).filter(Boolean)) {
-      for (const candidate of withWindowsExecutableExtensions(join(part, command), process.platform, input.env)) {
+      for (const candidate of withWindowsExecutableExtensions(
+        join(part, command),
+        platform,
+        input.env,
+      )) {
         if (await isExecutable(candidate)) {
           return candidate;
         }
@@ -122,9 +135,7 @@ export async function resolveCommandExecutable(input: {
     }
   }
 
-  throw new Error(
-    `Executable not found on PATH: ${commands.join(", ")}`,
-  );
+  throw new Error(`Executable not found on PATH: ${commands.join(", ")}`);
 }
 
 export function resolveCommandExecutableSync(input: {
@@ -132,15 +143,21 @@ export function resolveCommandExecutableSync(input: {
   env?: NodeJS.ProcessEnv;
   fallbackCommands?: string[];
   overridePath?: string;
+  platform?: NodeJS.Platform;
 }) {
   if (input.overridePath) {
     return input.overridePath;
   }
 
   const commands = getCandidates(input);
+  const platform = input.platform ?? process.platform;
   for (const command of commands) {
     if (isAbsolute(command)) {
-      for (const candidate of withWindowsExecutableExtensions(command, process.platform, input.env)) {
+      for (const candidate of withWindowsExecutableExtensions(
+        command,
+        platform,
+        input.env,
+      )) {
         if (isExecutableSync(candidate)) {
           return candidate;
         }
@@ -148,9 +165,13 @@ export function resolveCommandExecutableSync(input: {
       continue;
     }
 
-    const pathValue = getSearchPath(input.env);
+    const pathValue = getSearchPath(input.env, platform);
     for (const part of pathValue.split(delimiter).filter(Boolean)) {
-      for (const candidate of withWindowsExecutableExtensions(join(part, command), process.platform, input.env)) {
+      for (const candidate of withWindowsExecutableExtensions(
+        join(part, command),
+        platform,
+        input.env,
+      )) {
         if (isExecutableSync(candidate)) {
           return candidate;
         }

@@ -1,5 +1,11 @@
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -8,10 +14,15 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const fixture = mkdtempSync(path.join(tmpdir(), "agent-acp-kit-consumer-"));
 
 try {
-  const packOutput = execFileSync("npm", ["pack", "--json", "--pack-destination", fixture], {
-    cwd: root,
-    encoding: "utf8",
-  });
+  const npm = resolveNpmInvocation();
+  const packOutput = execFileSync(
+    npm.command,
+    [...npm.prefixArgs, "pack", "--json", "--pack-destination", fixture],
+    {
+      cwd: root,
+      encoding: "utf8",
+    },
+  );
   const packResult = JSON.parse(packOutput)[0];
   const tarball = path.join(fixture, packResult.filename);
   writeFileSync(
@@ -23,8 +34,15 @@ try {
     }),
   );
   execFileSync(
-    "npm",
-    ["install", "--ignore-scripts", tarball, "typescript@5.9.3", "@types/node@22.19.19"],
+    npm.command,
+    [
+      ...npm.prefixArgs,
+      "install",
+      "--ignore-scripts",
+      tarball,
+      "typescript@5.9.3",
+      "@types/node@22.19.19",
+    ],
     {
       cwd: fixture,
       stdio: "inherit",
@@ -47,8 +65,9 @@ export function selectable(provider: DetectedProvider): boolean {
 `,
   );
   execFileSync(
-    path.join(fixture, "node_modules/.bin/tsc"),
+    process.execPath,
     [
+      path.join(fixture, "node_modules/typescript/bin/tsc"),
       "--noEmit",
       "--strict",
       "--target",
@@ -75,11 +94,19 @@ import {
   redactTuttiCliChildProcessText,
 } from "@tutti-os/agent-acp-kit/tutti";
 import { isTuttiAgentCatalog } from "@tutti-os/agent-acp-kit/tutti/contracts";
+import { resolveProcessInvocation } from "@tutti-os/agent-acp-kit/process-adapter";
 import { createFakeAcpPeerScript } from "@tutti-os/agent-acp-kit/testing";
 
 const peer = createFakeAcpPeerScript({
   updates: [{ sessionUpdate: "text_delta", content: { text: "packed-ok" } }],
 });
+const directInvocation = resolveProcessInvocation({
+  command: process.execPath,
+  args: ["--version"],
+});
+if (directInvocation.command !== process.execPath) {
+  throw new Error("packed process adapter failed");
+}
 const packedProvider = createGenericAcpProvider({
   providerId: "packed",
   displayName: "Packed",
@@ -167,9 +194,31 @@ console.log(JSON.stringify({ ok: true, agents: catalog.agents.length, events: ev
     stdio: "inherit",
   });
   const packageJson = JSON.parse(
-    readFileSync(path.join(fixture, "node_modules/@tutti-os/agent-acp-kit/package.json"), "utf8"),
+    readFileSync(
+      path.join(fixture, "node_modules/@tutti-os/agent-acp-kit/package.json"),
+      "utf8",
+    ),
   );
-  console.log(`packed consumer verified @tutti-os/agent-acp-kit@${packageJson.version}`);
+  console.log(
+    `packed consumer verified @tutti-os/agent-acp-kit@${packageJson.version}`,
+  );
 } finally {
   rmSync(fixture, { recursive: true, force: true });
+}
+
+function resolveNpmInvocation() {
+  if (process.platform !== "win32") {
+    return { command: "npm", prefixArgs: [] };
+  }
+  const cli = path.join(
+    path.dirname(process.execPath),
+    "node_modules",
+    "npm",
+    "bin",
+    "npm-cli.js",
+  );
+  if (!existsSync(cli)) {
+    throw new Error(`npm CLI was not found beside Node.js: ${cli}`);
+  }
+  return { command: process.execPath, prefixArgs: [cli] };
 }

@@ -29,7 +29,8 @@ export function terminateProcessTree(
     const fallback = () => {
       if (fallbackStarted) return;
       fallbackStarted = true;
-      if (!child.killed) child.kill(signal);
+      if (child.exitCode === null && child.signalCode === null)
+        child.kill(signal);
     };
     killer.once("error", fallback);
     killer.once("close", (code) => {
@@ -51,10 +52,10 @@ export function attachAbortSignal(
   let killFallback: NodeJS.Timeout | undefined;
 
   const abort = () => {
-    if (!child.killed) {
+    if (child.exitCode === null && child.signalCode === null) {
       terminateProcessTree(child, "SIGTERM");
       killFallback = setTimeout(() => {
-        if (!child.killed) {
+        if (child.exitCode === null && child.signalCode === null) {
           terminateProcessTree(child, "SIGKILL");
         }
       }, options?.killAfterMs ?? 2_000);

@@ -27,6 +27,10 @@
       "types": "./dist/runtime/control-plane.d.ts",
       "import": "./dist/runtime/control-plane.js"
     },
+    "./process-adapter": {
+      "types": "./dist/process/process-adapter.d.ts",
+      "import": "./dist/process/process-adapter.js"
+    },
     "./testing": {
       "types": "./dist/testing/index.d.ts",
       "import": "./dist/testing/index.js"

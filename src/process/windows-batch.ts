@@ -1,5 +1,5 @@
 import { existsSync, readFileSync } from "node:fs";
-import { basename, dirname, normalize } from "node:path";
+import { basename, dirname, join, normalize } from "node:path";
 
 import { resolveCommandExecutableSync } from "./command-resolver.js";
 
@@ -16,7 +16,6 @@ export type WindowsBatchResolved = {
   command: string;
   args: string[];
   env?: Record<string, string>;
-  windowsVerbatimArguments?: boolean;
 };
 
 export function isWindowsBatchShim(
@@ -44,6 +43,7 @@ export function resolveWindowsBatchCommand(
       executable = resolveCommandExecutableSync({
         command: trimmed,
         env: options.env,
+        platform,
       });
     } catch {
       if (!isWindowsBatchShim(trimmed, platform)) return null;
@@ -83,25 +83,6 @@ function resolveBatchShimTarget(
   }
   const shimDir = dirname(shimPath);
 
-  for (const line of content.split(/\r?\n/)) {
-    if (!line.includes("%*")) continue;
-    const paths = (line.match(/"([^"]*)"/g) ?? [])
-      .map((quoted) => expandShimPath(quoted.slice(1, -1).trim(), shimDir))
-      .filter((value): value is string => Boolean(value));
-    for (let index = 0; index < paths.length; index += 1) {
-      const candidate = paths[index]!;
-      if (candidate === "node") {
-        return {
-          command: process.execPath,
-          prefixArgs: paths.slice(index + 1),
-          content,
-        };
-      }
-      if (/\.(?:exe|com)$/i.test(candidate) && existsSync(candidate)) {
-        return { command: candidate, prefixArgs: paths.slice(index + 1), content };
-      }
-    }
-  }
   const shimEnv = {
     ...baseEnv,
     ...extractBatchShimEnv(content, shimPath, baseEnv),
@@ -109,8 +90,50 @@ function resolveBatchShimTarget(
   for (const line of content.split(/\r?\n/)) {
     const target = resolvePowerShellShimLine(line, shimDir, shimEnv);
     if (target) return { ...target, content };
+    const direct = resolveDirectShimLine(line, shimDir, shimEnv);
+    if (direct) return { ...direct, content };
   }
   return null;
+}
+
+function resolveDirectShimLine(
+  line: string,
+  shimDir: string,
+  env: NodeJS.ProcessEnv,
+): { command: string; prefixArgs: string[] } | null {
+  const passthroughIndex = line.indexOf("%*");
+  if (passthroughIndex < 0) return null;
+  const prefix = line.slice(0, passthroughIndex).trim();
+  if (/^@?if\b/i.test(prefix)) return null;
+  const canonicalNpmLine = prefix.match(
+    /^@?endlocal\s+&\s+goto\s+\S+\s+2>nul\s+\|\|\s+title\s+%comspec%\s+&\s+(.+)$/i,
+  );
+  const commandPrefix = (canonicalNpmLine?.[1] ?? prefix)
+    .replace(/^@/u, "")
+    .trim();
+  if (/[&|<>()]/u.test(commandPrefix)) return null;
+  if (/powershell\.exe/i.test(commandPrefix)) {
+    return null;
+  }
+  const tokens = Array.from(
+    commandPrefix.matchAll(/"([^"]*)"|([^\s"]+)/g),
+    (match) => (match[1] ?? match[2] ?? "").trim(),
+  ).filter(Boolean);
+  if (tokens.length === 0) return null;
+
+  const commandToken = tokens[0]!;
+  const expandedCommand = expandBatchToken(commandToken, shimDir, env);
+  if (!expandedCommand) return null;
+  const command = normalize(expandedCommand);
+  if (!/\.(?:exe|com)$/i.test(command) || !existsSync(command)) {
+    return null;
+  }
+
+  const prefixArgs = tokens
+    .slice(1)
+    .map((token) => expandBatchToken(token, shimDir, env));
+  if (prefixArgs.some((token) => token === null)) return null;
+  return { command, prefixArgs: prefixArgs as string[] };
 }
 
 function resolvePowerShellShimLine(
@@ -127,15 +150,25 @@ function resolvePowerShellShimLine(
   ).filter(Boolean);
   if (tokens.length < 3) return null;
 
-  const commandValue = expandBatchToken(tokens[0]!.replace(/^@/u, ""), shimDir, env);
+  const commandValue = expandBatchToken(
+    tokens[0]!.replace(/^@/u, ""),
+    shimDir,
+    env,
+  );
   if (!commandValue) return null;
   const command = normalize(commandValue);
   if (!/powershell\.exe$/i.test(command) || !existsSync(command)) return null;
 
-  const prefixArgs = tokens.slice(1).map((token) => expandBatchToken(token, shimDir, env));
+  const prefixArgs = tokens
+    .slice(1)
+    .map((token) => expandBatchToken(token, shimDir, env));
   if (prefixArgs.some((token) => token === null)) return null;
   const args = prefixArgs as string[];
-  if (args.some((arg) => /^-(?:command|encodedcommand|commandwithargs)$/i.test(arg))) {
+  if (
+    args.some((arg) =>
+      /^-(?:command|encodedcommand|commandwithargs)$/i.test(arg),
+    )
+  ) {
     return null;
   }
   const fileIndex = args.findIndex((arg) => /^-file$/i.test(arg));
@@ -152,7 +185,25 @@ function expandBatchToken(
   env: NodeJS.ProcessEnv,
 ): string | null {
   let unresolved = false;
+  let nodeProgram: string | undefined;
+  if (/%_prog%/i.test(token)) {
+    const localNode = join(shimDir, "node.exe");
+    if (existsSync(localNode)) {
+      nodeProgram = localNode;
+    } else {
+      try {
+        nodeProgram = resolveCommandExecutableSync({
+          command: "node",
+          env,
+          platform: "win32",
+        });
+      } catch {
+        return null;
+      }
+    }
+  }
   const expanded = token
+    .replace(/%_prog%/gi, nodeProgram ?? "")
     .replace(/%~?dp0%?/gi, `${shimDir}\\`)
     .replace(/%([^%]+)%/g, (_placeholder, envKey: string) => {
       const value = getEnvValue(env, envKey);
@@ -182,8 +233,10 @@ function extractBatchShimEnv(
     const value = (match[2] ?? "")
       .replace(/%~nx0/gi, basename(shimPath))
       .replace(/%~?dp0%?/gi, `${shimDir}\\`)
-      .replace(/%([^%]+)%/g, (placeholder, envKey: string) =>
-        getEnvValue(baseEnv, envKey) ?? placeholder,
+      .replace(
+        /%([^%]+)%/g,
+        (placeholder, envKey: string) =>
+          getEnvValue(baseEnv, envKey) ?? placeholder,
       )
       .trim();
     if (value) env[key] = value;
@@ -196,9 +249,4 @@ function getEnvValue(env: NodeJS.ProcessEnv, key: string) {
     (candidate) => candidate.toLowerCase() === key.toLowerCase(),
   );
   return match ? env[match] : undefined;
-}
-
-function expandShimPath(raw: string, shimDir: string): string {
-  const dir = shimDir.replace(/[\\/]+$/, "");
-  return raw.replace(/%~?dp0%/gi, dir).replace(/%_prog%/gi, "node");
 }

@@ -1,4 +1,10 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -15,27 +21,77 @@ describe("resolveWindowsBatchCommand", () => {
     }
   });
 
-  it.runIf(process.platform === "win32")(
-    "resolves an absolute extensionless npm launcher to its cmd shim",
-    () => {
-      const dir = mkdtempSync(join(tmpdir(), "agent-acp-kit-batch-"));
-      tempDirs.push(dir);
-      const launcher = join(dir, "claude");
-      const cliPath = join(dir, "cli.js");
-      writeFileSync(cliPath, "");
-      writeFileSync(
-        `${launcher}.cmd`,
-        `@"${process.execPath}" "${cliPath}" %*\r\n`,
-      );
+  it("resolves an absolute extensionless npm launcher to its cmd shim", () => {
+    const dir = mkdtempSync(join(tmpdir(), "agent-acp-kit-batch-"));
+    tempDirs.push(dir);
+    const launcher = join(dir, "claude");
+    const node = join(dir, "node.exe");
+    const cliPath = join(dir, "cli.js");
+    writeFileSync(node, "");
+    writeFileSync(cliPath, "");
+    writeFileSync(`${launcher}.cmd`, `@"${node}" "${cliPath}" %*\r\n`);
+    chmodSync(`${launcher}.cmd`, 0o755);
 
-      expect(
-        resolveWindowsBatchCommand(launcher, ["--version"], "win32"),
-      ).toMatchObject({
-        command: process.execPath,
-        args: [cliPath, "--version"],
-      });
-    },
-  );
+    expect(
+      resolveWindowsBatchCommand(launcher, ["--version"], "win32"),
+    ).toMatchObject({
+      command: node,
+      args: [cliPath, "--version"],
+    });
+  });
+
+  it("rejects a conditional command line instead of treating its probe as argv", () => {
+    const dir = mkdtempSync(join(tmpdir(), "agent-acp-kit-batch-conditional-"));
+    tempDirs.push(dir);
+    const shim = join(dir, "unsafe.cmd");
+    const node = join(dir, "node.exe");
+    const cliPath = join(dir, "cli.js");
+    writeFileSync(node, "");
+    writeFileSync(cliPath, "");
+    writeFileSync(shim, `IF EXIST "${node}" ("${node}" "${cliPath}" %*)\r\n`);
+
+    expect(() =>
+      resolveWindowsBatchCommand(shim, ["--version"], "win32"),
+    ).toThrow("Unsupported Windows batch shim");
+  });
+
+  it("resolves the canonical npm shim through its colocated node executable", () => {
+    const dir = mkdtempSync(join(tmpdir(), "agent acp kit npm shim "));
+    tempDirs.push(dir);
+    const shim = join(dir, "codex.cmd");
+    const node = join(dir, "node.exe");
+    const cliPath = join(dir, "node_modules", "codex", "cli.js");
+    mkdirSync(dirname(cliPath), { recursive: true });
+    writeFileSync(node, "");
+    writeFileSync(cliPath, "");
+    writeFileSync(
+      shim,
+      `@ECHO off\r\nSETLOCAL\r\nSET "_prog=%~dp0\\node.exe"\r\nendLocal & goto #_undefined_# 2>NUL || title %COMSPEC% & "%_prog%" "${cliPath}" %*\r\n`,
+    );
+
+    expect(
+      resolveWindowsBatchCommand(shim, ["--version"], "win32"),
+    ).toMatchObject({
+      command: node,
+      args: [cliPath, "--version"],
+    });
+  });
+
+  it("rejects PowerShell command-string launchers", () => {
+    const dir = mkdtempSync(join(tmpdir(), "agent-acp-kit-powershell-command-"));
+    tempDirs.push(dir);
+    const powershell = join(dir, "powershell.exe");
+    const shim = join(dir, "unsafe.cmd");
+    writeFileSync(powershell, "");
+    writeFileSync(
+      shim,
+      `"${powershell}" -NoProfile -Command "& { run-agent @args }" %*\r\n`,
+    );
+
+    expect(() =>
+      resolveWindowsBatchCommand(shim, ["a&b"], "win32"),
+    ).toThrow("Unsupported Windows batch shim");
+  });
 
   it.runIf(process.platform === "win32")(
     "resolves a PowerShell file launcher without invoking cmd.exe",

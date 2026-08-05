@@ -67,7 +67,8 @@ function claudeCatalog() {
 }
 
 function composer(agentTargetId: string) {
-  const model = agentTargetId === "team:writer" ? "writer-model" : "reviewer-model";
+  const model =
+    agentTargetId === "team:writer" ? "writer-model" : "reviewer-model";
   return {
     schemaVersion: 2,
     agentTargetId,
@@ -157,6 +158,7 @@ describe("Tutti-aware runtime integration", () => {
     expect(detected).toMatchObject([
       {
         agentTargetId: "team:writer",
+        executablePath: "/resolved/bin/codex",
         provider: "codex",
         displayName: "Writer",
         supported: true,
@@ -179,26 +181,39 @@ describe("Tutti-aware runtime integration", () => {
       },
     ]);
     expect(calls.filter((args) => args.includes("list"))).toHaveLength(1);
-    expect(calls.filter((args) => args.includes("composer-options"))).toHaveLength(2);
+    expect(
+      calls.filter((args) => args.includes("composer-options")),
+    ).toHaveLength(2);
   });
 
   it("single-flights and caches Tutti detection until refresh", async () => {
     const runTuttiCli = vi.fn(async (args: string[]) =>
-      args.includes("list") ? catalog() : composer(args[args.indexOf("--agent-id") + 1]!),
+      args.includes("list")
+        ? catalog()
+        : composer(args[args.indexOf("--agent-id") + 1]!),
     );
     const integration = createTuttiRuntimeIntegration({ runTuttiCli });
     const input = { descriptors, context: { cwd: "/workspace/project" } };
 
     await Promise.all([integration.detect(input), integration.detect(input)]);
-    expect(runTuttiCli.mock.calls.filter(([args]) => args.includes("list"))).toHaveLength(1);
+    expect(
+      runTuttiCli.mock.calls.filter(([args]) => args.includes("list")),
+    ).toHaveLength(1);
 
-    await integration.detect({ ...input, context: { ...input.context, refresh: true } });
-    expect(runTuttiCli.mock.calls.filter(([args]) => args.includes("list"))).toHaveLength(2);
+    await integration.detect({
+      ...input,
+      context: { ...input.context, refresh: true },
+    });
+    expect(
+      runTuttiCli.mock.calls.filter(([args]) => args.includes("list")),
+    ).toHaveLength(2);
   });
 
   it("reuses workspace and exact-target caches when project cwd changes", async () => {
     const runTuttiCli = vi.fn(async (args: string[]) =>
-      args.includes("list") ? catalog() : composer(args[args.indexOf("--agent-id") + 1]!),
+      args.includes("list")
+        ? catalog()
+        : composer(args[args.indexOf("--agent-id") + 1]!),
     );
     const integration = createTuttiRuntimeIntegration({ runTuttiCli });
     const env = {
@@ -206,28 +221,50 @@ describe("Tutti-aware runtime integration", () => {
       TUTTI_WORKSPACE_ID: "workspace-1",
     };
 
-    await integration.detect({ descriptors, context: { cwd: "/workspace", env } });
     await integration.detect({
       descriptors,
-      context: { cwd: "/workspace/.tsh/apps/data/app-1/projects/project-1", env },
+      context: { cwd: "/workspace", env },
+    });
+    await integration.detect({
+      descriptors,
+      context: {
+        cwd: "/workspace/.tsh/apps/data/app-1/projects/project-1",
+        env,
+      },
     });
 
-    expect(runTuttiCli.mock.calls.filter(([args]) => args.includes("list"))).toHaveLength(1);
-    expect(runTuttiCli.mock.calls.filter(([args]) => args.includes("composer-options"))).toHaveLength(2);
+    expect(
+      runTuttiCli.mock.calls.filter(([args]) => args.includes("list")),
+    ).toHaveLength(1);
+    expect(
+      runTuttiCli.mock.calls.filter(([args]) =>
+        args.includes("composer-options"),
+      ),
+    ).toHaveLength(2);
   });
 
-  it("reuses the exact-target composer cache during runtime preparation", async () => {
-    const runTuttiCli = vi.fn(async (args: string[]) =>
-      args.includes("list") ? catalog() : composer(args[args.indexOf("--agent-id") + 1]!),
-    );
+  it("refreshes the exact target before runtime preparation", async () => {
+    let catalogPath = "/resolved/bin/codex-old";
+    const runTuttiCli = vi.fn(async (args: string[]) => {
+      if (!args.includes("list")) {
+        return composer(args[args.indexOf("--agent-id") + 1]!);
+      }
+      const payload = catalog();
+      payload.agents[0]!.executablePath = catalogPath;
+      return payload;
+    });
     const integration = createTuttiRuntimeIntegration({ runTuttiCli });
     const env = {
       TUTTI_CLI: "/opt/tsh/bundle/bin/tutti",
       TUTTI_WORKSPACE_ID: "workspace-1",
     };
-    await integration.detect({ descriptors, context: { cwd: "/workspace", env } });
+    await integration.detect({
+      descriptors,
+      context: { cwd: "/workspace", env },
+    });
+    catalogPath = "/resolved/bin/codex-new";
 
-    await integration.prepareRun({
+    const prepared = await integration.prepareRun({
       descriptors,
       env,
       run: {
@@ -239,12 +276,16 @@ describe("Tutti-aware runtime integration", () => {
       },
     });
 
-    expect(runTuttiCli.mock.calls.filter(([args]) => args.includes("list"))).toHaveLength(1);
+    expect(prepared.executablePath).toBe("/resolved/bin/codex-new");
+    expect(
+      runTuttiCli.mock.calls.filter(([args]) => args.includes("list")),
+    ).toHaveLength(2);
     expect(
       runTuttiCli.mock.calls.filter(
-        ([args]) => args.includes("composer-options") && args.includes("team:writer"),
+        ([args]) =>
+          args.includes("composer-options") && args.includes("team:writer"),
       ),
-    ).toHaveLength(1);
+    ).toHaveLength(2);
   });
 
   it("applies target-scoped model and reasoning defaults without applying the permission UI default", async () => {
@@ -316,11 +357,17 @@ describe("Tutti-aware runtime integration", () => {
   });
 
   it("lets the Claude provider apply the autonomous default after ignoring its permission UI default", async () => {
-    const integration = createTuttiRuntimeIntegration<"local-agent", "claude-code">({
+    const integration = createTuttiRuntimeIntegration<
+      "local-agent",
+      "claude-code"
+    >({
       runTuttiCli: async (args) =>
         args.includes("list") ? claudeCatalog() : claudeComposer(),
     });
-    const claudeDescriptors: RuntimeAgentDescriptor<"local-agent", "claude-code">[] = [
+    const claudeDescriptors: RuntimeAgentDescriptor<
+      "local-agent",
+      "claude-code"
+    >[] = [
       {
         id: "claude-code",
         displayName: "Claude Code",

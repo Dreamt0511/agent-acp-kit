@@ -3,7 +3,7 @@ import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { homedir, platform, tmpdir } from "node:os";
 import path from "node:path";
-import { resolveWindowsBatchCommand } from "./windows-batch.js";
+import { resolveProcessInvocation } from "./process-adapter.js";
 
 // System proxy injection.
 //
@@ -53,9 +53,7 @@ function getPathEnvKey(env: NodeJS.ProcessEnv) {
   if (Object.prototype.hasOwnProperty.call(env, "PATH")) {
     return "PATH";
   }
-  return (
-    Object.keys(env).find((key) => key.toUpperCase() === "PATH") ?? "PATH"
-  );
+  return Object.keys(env).find((key) => key.toUpperCase() === "PATH") ?? "PATH";
 }
 
 function getPathEnv(env: NodeJS.ProcessEnv) {
@@ -72,7 +70,10 @@ function setPathEnv(env: NodeJS.ProcessEnv, value: string) {
   env[pathKey] = value;
 }
 
-function deleteEnvKeysCaseInsensitive(env: NodeJS.ProcessEnv, keys: readonly string[]) {
+function deleteEnvKeysCaseInsensitive(
+  env: NodeJS.ProcessEnv,
+  keys: readonly string[],
+) {
   const targets = new Set(keys.map((key) => key.toUpperCase()));
   for (const key of Object.keys(env)) {
     if (targets.has(key.toUpperCase())) {
@@ -157,24 +158,20 @@ async function runNpmPrefixCommand(
   env: NodeJS.ProcessEnv,
 ): Promise<string | undefined> {
   return new Promise((resolve) => {
-    let batchExec;
+    let invocation;
     try {
-      batchExec = resolveWindowsBatchCommand(
+      invocation = resolveProcessInvocation({
         command,
-        ["prefix", "-g"],
-        process.platform,
-        { env },
-      );
+        args: ["prefix", "-g"],
+        env,
+      });
     } catch {
       resolve(undefined);
       return;
     }
-    const child = spawn(batchExec?.command ?? command, batchExec?.args ?? ["prefix", "-g"], {
-      env: batchExec?.env ? { ...env, ...batchExec.env } : env,
+    const child = spawn(invocation.command, invocation.args, {
+      env: invocation.env,
       stdio: ["ignore", "pipe", "ignore"],
-      ...(batchExec?.windowsVerbatimArguments
-        ? { windowsVerbatimArguments: true }
-        : {}),
     });
     let stdout = "";
     let settled = false;
@@ -237,7 +234,9 @@ export async function buildLocalAgentProcessEnv(
   if (npmPrefix) {
     setPathEnv(
       env,
-      appendUniquePathDirs(getPathEnv(env), [npmGlobalBinFromPrefix(npmPrefix)]),
+      appendUniquePathDirs(getPathEnv(env), [
+        npmGlobalBinFromPrefix(npmPrefix),
+      ]),
     );
   }
 

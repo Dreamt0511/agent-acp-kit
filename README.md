@@ -194,7 +194,9 @@ environment before invoking the runtime.
 There is no app-facing mode switch. `runtime.detect()` is the single discovery
 API. When `TUTTI_CLI` is configured it uses `agent list` plus target-scoped
 composer JSON and preserves every exact Agent Target, including multiple
-targets backed by one runtime provider. Without `TUTTI_CLI` it performs direct
+targets backed by one runtime provider. Shared peer targets whose
+`agentTargetId` starts with `shared-agent:` are omitted; this kit only drives
+local Provider processes. Without `TUTTI_CLI` it performs direct
 Provider plugin detection. `runtime.run()` accepts the selected
 `agentTargetId` and applies its latest target-scoped model and reasoning
 defaults internally before launching the app-owned local Provider process. When

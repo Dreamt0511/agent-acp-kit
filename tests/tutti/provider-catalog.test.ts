@@ -141,6 +141,37 @@ describe("Tutti agent catalog", () => {
     ]);
   });
 
+  it("omits shared-agent targets and reselects the default when needed", async () => {
+    const catalog = await loadTuttiAgentCatalog({
+      runtime: fakeRuntime(),
+      runTuttiCli: async () => ({
+        schemaVersion: 1,
+        defaultAgentTargetId: "shared-agent:shared-codex",
+        agents: [
+          {
+            id: "shared-agent:shared-codex",
+            name: "Shared Codex",
+            provider: "codex",
+            availability: { status: "available", reasonCode: "", detail: "" },
+          },
+          {
+            id: "shared-agent:own-other-device-codex",
+            name: "Own Other Device Codex",
+            provider: "codex",
+            availability: { status: "available", reasonCode: "", detail: "" },
+          },
+          newCatalog.agents[1],
+          newCatalog.agents[0],
+        ],
+      }),
+    });
+    expect(catalog.agents.map((agent) => agent.agentTargetId)).toEqual([
+      "local:codex",
+      "user:future",
+    ]);
+    expect(catalog.defaultAgentTargetId).toBe("local:codex");
+  });
+
   it("falls back to the old provider contract without inventing target ids", async () => {
     const calls: string[][] = [];
     const catalog = await loadTuttiAgentCatalog({

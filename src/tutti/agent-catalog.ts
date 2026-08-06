@@ -13,6 +13,9 @@ import type {
 } from "./contracts.js";
 import { canonicalTuttiProviderId, isRecord, optionalString } from "./internal.js";
 
+/** TSH shared-agent targets are not supported by this kit's local runtime path. */
+const SHARED_AGENT_TARGET_PREFIX = "shared-agent:";
+
 export interface LoadTuttiAgentCatalogInput extends Omit<TuttiCliJsonRequest, "args"> {
   runtime: LocalAgentRuntime<string, string>;
 }
@@ -80,22 +83,31 @@ function parseCliAgentCatalog(
     throw invalidCatalog("Tutti agent catalog fields are invalid.");
   }
 
-  const agents = parseCatalogEntries({
-    values: payload.agents,
-    runtime,
-    detectContext,
-    agentTargetIdField: "id",
-    providerIdField: "provider",
-    displayNameField: "name",
-  });
+  const agents = withoutSharedAgents(
+    parseCatalogEntries({
+      values: payload.agents,
+      runtime,
+      detectContext,
+      agentTargetIdField: "id",
+      providerIdField: "provider",
+      displayNameField: "name",
+    }),
+  );
   const defaultAgentTargetId = payload.defaultAgentTargetId.trim();
+  const defaultPresent = agents.some((agent) => agent.agentTargetId === defaultAgentTargetId);
+  const defaultWasShared = isSharedAgentTargetId(defaultAgentTargetId);
   if (
-    (agents.length === 0 && defaultAgentTargetId !== "") ||
-    (agents.length > 0 && !agents.some((agent) => agent.agentTargetId === defaultAgentTargetId))
+    (agents.length === 0 && defaultAgentTargetId !== "" && !defaultWasShared) ||
+    (agents.length > 0 && !defaultPresent && !defaultWasShared)
   ) {
     throw invalidCatalog("Tutti agent catalog defaultAgentTargetId is invalid.");
   }
-  return normalizedCatalog(agents, "tutti-cli", "agent-id", defaultAgentTargetId);
+  return normalizedCatalog(
+    agents,
+    "tutti-cli",
+    "agent-id",
+    defaultPresent ? defaultAgentTargetId : undefined,
+  );
 }
 
 function parseLegacyProviderCatalog(
@@ -119,14 +131,16 @@ function parseLegacyProviderCatalog(
     throw invalidCatalog("Tutti legacy provider catalog fields are invalid.");
   }
 
-  const agents = parseCatalogEntries({
-    values: payload.providers,
-    runtime,
-    detectContext,
-    agentTargetIdField: "agentTargetId",
-    providerIdField: "providerId",
-    displayNameField: "displayName",
-  });
+  const agents = withoutSharedAgents(
+    parseCatalogEntries({
+      values: payload.providers,
+      runtime,
+      detectContext,
+      agentTargetIdField: "agentTargetId",
+      providerIdField: "providerId",
+      displayNameField: "displayName",
+    }),
+  );
   const requestedDefaultProvider = canonicalTuttiProviderId(
     optionalString(payload.defaultProviderId) ?? "",
   );
@@ -204,6 +218,14 @@ async function loadStandaloneAgentCatalog(
     } satisfies TuttiAgentCatalogEntry;
   });
   return normalizedCatalog(agents, "standalone", "agent-id");
+}
+
+function withoutSharedAgents(agents: TuttiAgentCatalogEntry[]): TuttiAgentCatalogEntry[] {
+  return agents.filter((agent) => !isSharedAgentTargetId(agent.agentTargetId));
+}
+
+function isSharedAgentTargetId(agentTargetId: string): boolean {
+  return agentTargetId.startsWith(SHARED_AGENT_TARGET_PREFIX);
 }
 
 function normalizedCatalog(

@@ -478,7 +478,7 @@ promotes the composer default into execution policy.
 
 ACP lifecycle requests use method-specific defaults: ordinary control requests
 time out after 15 seconds, `session/new` after 30 seconds, and
-`session/prompt` after 30 minutes. An explicit run or launch-plan `timeoutMs`
+`session/prompt` after 3 minutes. An explicit run or launch-plan `timeoutMs`
 continues to override these defaults.
 
 ## VM-local Codex Home

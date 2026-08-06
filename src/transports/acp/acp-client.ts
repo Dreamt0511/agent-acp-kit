@@ -11,7 +11,7 @@ import { buildAcpSessionNewParams } from "./acp-session.js";
 
 const DEFAULT_ACP_REQUEST_TIMEOUT_MS = 15_000;
 const DEFAULT_ACP_SESSION_NEW_TIMEOUT_MS = 30_000;
-const DEFAULT_ACP_SESSION_PROMPT_TIMEOUT_MS = 30 * 60_000;
+const DEFAULT_ACP_SESSION_PROMPT_TIMEOUT_MS = 3 * 60_000;
 
 export function resolveAcpRequestTimeoutMs(
   method: string,

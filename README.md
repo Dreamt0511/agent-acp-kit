@@ -474,6 +474,13 @@ offer a permission picker must pass the user's explicit choice in
 `AgentRunInput.permission`; the automatic Tutti runtime integration never
 promotes the composer default into execution policy.
 
+## ACP Request Timeouts
+
+ACP lifecycle requests use method-specific defaults: ordinary control requests
+time out after 15 seconds, `session/new` after 30 seconds, and
+`session/prompt` after 30 minutes. An explicit run or launch-plan `timeoutMs`
+continues to override these defaults.
+
 ## VM-local Codex Home
 
 For Codex runs, pass the VM session user's existing Codex home explicitly:

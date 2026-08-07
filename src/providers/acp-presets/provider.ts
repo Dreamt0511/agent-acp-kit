@@ -8,6 +8,7 @@ import { createGenericAcpProvider } from "../generic-acp/provider.js";
 
 export type AcpProviderSpec = {
   id: string;
+  aliases?: readonly string[];
   displayName: string;
   command: string;
   args: readonly string[];
@@ -32,6 +33,7 @@ export const ACP_PROVIDER_SPECS = [
   },
   {
     id: "hermes",
+    aliases: ["acp:hermes"],
     displayName: "Hermes",
     command: "hermes",
     args: ["acp", "--accept-hooks"],
@@ -40,6 +42,7 @@ export const ACP_PROVIDER_SPECS = [
   },
   {
     id: "kimi",
+    aliases: ["kimi-code", "acp:kimi-code"],
     displayName: "Kimi CLI",
     command: "kimi",
     args: ["acp"],
@@ -118,6 +121,8 @@ export const DEFAULT_LOCAL_AGENT_PROVIDER_IDS = [
   "codex",
   "claude-code",
   "tutti-agent",
+  "hermes",
+  "kimi",
   "opencode",
   "cursor",
 ] as const;
@@ -130,13 +135,16 @@ function resolveProviderCommand(spec: AcpProviderSpec) {
 export function createKnownAcpProvider(
   providerId: AcpProviderId,
 ): LocalAgentProviderPlugin<"local-agent", string> {
-  const spec = ACP_PROVIDER_SPECS.find((provider) => provider.id === providerId);
+  const spec: AcpProviderSpec | undefined = ACP_PROVIDER_SPECS.find(
+    (provider) => provider.id === providerId,
+  );
   if (!spec) {
     throw new Error(`Unknown ACP provider id: ${providerId}`);
   }
 
   return createGenericAcpProvider({
     args: [...spec.args],
+    ...(spec.aliases ? { aliases: spec.aliases } : {}),
     command: resolveProviderCommand(spec),
     displayName: spec.displayName,
     providerId: spec.id,
@@ -195,6 +203,8 @@ export function createDefaultLocalAgentProviderPlugins(): LocalAgentProviderPlug
     createCodexProvider(),
     createClaudeProvider(),
     createTuttiAgentProvider(),
+    createHermesProvider(),
+    createKimiProvider(),
     createOpenCodeProvider(),
     createCursorProvider(),
   ];

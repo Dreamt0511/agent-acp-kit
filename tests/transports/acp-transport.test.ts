@@ -1,8 +1,25 @@
 import { describe, expect, it } from "vitest";
 
 import { detectAcpModels } from "../../src/transports/acp/acp-models.js";
-import { runAcpTransport } from "../../src/transports/acp/acp-client.js";
+import {
+  resolveAcpRequestTimeoutMs,
+  runAcpTransport,
+} from "../../src/transports/acp/acp-client.js";
 import { createFakeAcpPeerScript } from "../../src/testing/index.js";
+
+describe("resolveAcpRequestTimeoutMs", () => {
+  it("uses lifecycle-specific defaults and preserves explicit overrides", () => {
+    expect(resolveAcpRequestTimeoutMs("initialize")).toBe(15_000);
+    expect(resolveAcpRequestTimeoutMs("session/new")).toBe(30_000);
+    expect(resolveAcpRequestTimeoutMs("session/prompt")).toBe(3 * 60_000);
+    expect(resolveAcpRequestTimeoutMs("session/new", 5_000, 10_000)).toBe(
+      5_000,
+    );
+    expect(resolveAcpRequestTimeoutMs("session/new", undefined, 10_000)).toBe(
+      10_000,
+    );
+  });
+});
 
 describe("runAcpTransport", () => {
   it("discovers ACP models from session/new", async () => {

@@ -263,8 +263,8 @@ import {
 | Claude Code (`claude-code`) | Supported    | `claude -p --output-format stream-json` | Canonical provider ID is `claude-code`; legacy `claude` input is accepted internally; supports fallback model hints, custom model pass-through, and same-provider resume via `--resume <session>` |
 | Tutti Agent (`tutti-agent`) | Supported    | `tutti-agent exec --json` JSONL         | First-party canonical provider; runs use a temporary `TUTTI_AGENT_HOME` derived from the VM-local source Home; authentication is probed with `tutti-agent login status`; no Nexight runtime alias |
 | Devin for Terminal          | Experimental | ACP JSON-RPC                            | Shared generic ACP transport; command override `DEVIN_ACP_BIN`                                                                                                                                    |
-| Hermes                      | Experimental | ACP JSON-RPC                            | Shared generic ACP transport; command override `HERMES_ACP_BIN`                                                                                                                                   |
-| Kimi                        | Experimental | ACP JSON-RPC                            | Shared generic ACP transport; command override `KIMI_ACP_BIN`                                                                                                                                     |
+| Hermes (`hermes`)           | Experimental | ACP JSON-RPC                            | Registered by the default runtime; Tutti provider ID `acp:hermes` is accepted as an input alias; command override `HERMES_ACP_BIN`                                                                 |
+| Kimi (`kimi`)               | Experimental | ACP JSON-RPC                            | Registered by the default runtime; Tutti provider IDs `kimi-code` and `acp:kimi-code` are accepted as input aliases; command override `KIMI_ACP_BIN`                                               |
 | Kiro                        | Experimental | ACP JSON-RPC                            | Shared generic ACP transport; command override `KIRO_ACP_BIN`                                                                                                                                     |
 | Kilo                        | Experimental | ACP JSON-RPC                            | Shared generic ACP transport; command override `KILO_ACP_BIN`                                                                                                                                     |
 | Mistral Vibe                | Experimental | ACP JSON-RPC                            | Shared generic ACP transport; command override `VIBE_ACP_BIN`                                                                                                                                     |
@@ -436,6 +436,13 @@ standalone no-argument detection is cached per Provider. After the catalog,
 credentials, models, or local CLI installation changes, call
 `runtime.detect({ refresh: true })` to refresh it.
 
+For Agent Extensions, Tutti detection refines the broad catalog with one exact
+`agent list --agent-id <agent-id>` availability request per target. These
+requests and the initial broad catalog request have a one-minute client timeout.
+Exact availability results are cached per runtime scope;
+`runtime.detect({ refresh: true })` clears that cache and asks the daemon to
+refresh its short-lived, coalesced authentication probe.
+
 Provider behavior differs:
 
 - Codex: attempts dynamic discovery with `codex debug models`, then falls back to bundled or package model hints.
@@ -473,6 +480,13 @@ initial selection, not an explicit App run selection. Hosts that intentionally
 offer a permission picker must pass the user's explicit choice in
 `AgentRunInput.permission`; the automatic Tutti runtime integration never
 promotes the composer default into execution policy.
+
+## ACP Request Timeouts
+
+ACP lifecycle requests use method-specific defaults: ordinary control requests
+time out after 15 seconds, `session/new` after 30 seconds, and
+`session/prompt` after 3 minutes. An explicit run or launch-plan `timeoutMs`
+continues to override these defaults.
 
 ## VM-local Codex Home
 

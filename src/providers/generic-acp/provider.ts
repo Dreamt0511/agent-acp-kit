@@ -17,6 +17,7 @@ export function createGenericAcpProvider(input: {
   command: string;
   displayName: string;
   providerId: string;
+  aliases?: readonly string[];
   args: string[];
 }) {
   const runWorkspaces = createProviderRunWorkspaceManager(input.providerId);
@@ -41,6 +42,7 @@ export function createGenericAcpProvider(input: {
 
   const plugin: LocalAgentProviderPlugin<"local-agent", string> = {
     id: input.providerId,
+    ...(input.aliases?.length ? { aliases: [...input.aliases] } : {}),
     displayName: input.displayName,
     kind: "local-agent",
     async detect(context) {

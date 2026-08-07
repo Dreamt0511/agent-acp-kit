@@ -9,6 +9,26 @@ import { createJsonRpcLineParser, sendJsonRpc } from "./acp-jsonrpc.js";
 import { choosePermissionOutcome } from "./acp-permissions.js";
 import { buildAcpSessionNewParams } from "./acp-session.js";
 
+const DEFAULT_ACP_REQUEST_TIMEOUT_MS = 15_000;
+const DEFAULT_ACP_SESSION_NEW_TIMEOUT_MS = 30_000;
+const DEFAULT_ACP_SESSION_PROMPT_TIMEOUT_MS = 3 * 60_000;
+
+export function resolveAcpRequestTimeoutMs(
+  method: string,
+  paramsTimeoutMs?: number,
+  planTimeoutMs?: number,
+) {
+  return (
+    paramsTimeoutMs ??
+    planTimeoutMs ??
+    (method === "session/prompt"
+      ? DEFAULT_ACP_SESSION_PROMPT_TIMEOUT_MS
+      : method === "session/new"
+        ? DEFAULT_ACP_SESSION_NEW_TIMEOUT_MS
+        : DEFAULT_ACP_REQUEST_TIMEOUT_MS)
+  );
+}
+
 type AcpToolCallState = {
   name: string;
   rawName?: string;
@@ -263,7 +283,11 @@ export async function* runAcpTransport(
 
   function sendRequest(method: string, requestParams?: unknown) {
     const id = nextId++;
-    const timeoutMs = params.timeoutMs ?? plan.timeoutMs ?? 15_000;
+    const timeoutMs = resolveAcpRequestTimeoutMs(
+      method,
+      params.timeoutMs,
+      plan.timeoutMs,
+    );
     const promise = new Promise<unknown>((resolve, reject) => {
       const timer = setTimeout(() => {
         pending.delete(id);

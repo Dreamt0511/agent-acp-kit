@@ -16,6 +16,8 @@ import {
   DEFAULT_LOCAL_AGENT_PROVIDER_IDS,
   createDefaultLocalAgentProviderPlugins,
   createGenericAcpProvider,
+  createHermesProvider,
+  createKimiProvider,
   createKnownAcpProvider,
 } from "../../src/index.js";
 import { createFakeAcpPeerScript } from "../../src/testing/index.js";
@@ -160,6 +162,17 @@ setTimeout(() => process.exit(42), 10);
     expect(providers.map((provider) => provider.kind)).toEqual(
       providers.map(() => "local-agent"),
     );
+  });
+
+  it("accepts Tutti extension provider ids as input aliases", () => {
+    expect(createHermesProvider()).toMatchObject({
+      id: "hermes",
+      aliases: ["acp:hermes"],
+    });
+    expect(createKimiProvider()).toMatchObject({
+      id: "kimi",
+      aliases: ["kimi-code", "acp:kimi-code"],
+    });
   });
 
   for (const providerId of ["cursor", "opencode"] as const) {

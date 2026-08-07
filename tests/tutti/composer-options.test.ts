@@ -80,7 +80,7 @@ describe("Tutti composer options", () => {
       },
     });
     expect(calls).toEqual([
-      ["--json", "agent", "list"],
+      ["--json", "agent", "list", "--agent-id", "local:codex"],
       ["--json", "agent", "composer-options", "--agent-id", "local:codex", "--cwd", "/workspace"],
     ]);
     expect(options).toMatchObject({
@@ -90,7 +90,7 @@ describe("Tutti composer options", () => {
       providerId: "codex",
       modelConfig: { currentValue: "gpt-5" },
     });
-    expect(timeouts).toEqual([10_000, 45_000]);
+    expect(timeouts).toEqual([60_000, 45_000]);
   });
 
   it("uses the old provider selector after legacy catalog negotiation", async () => {
@@ -288,7 +288,9 @@ describe("Tutti composer options", () => {
       loadTuttiAgentComposerOptions({
         runtime: runtime(),
         agentTargetId: "future:agent",
-        runTuttiCli: async () => cliCatalog,
+        runTuttiCli: async () => {
+          throw new TuttiIntegrationError("agent_not_found", "Agent Target was not found.");
+        },
       }),
     ).rejects.toMatchObject({ code: "agent_not_found" });
   });

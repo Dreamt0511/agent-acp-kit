@@ -18,6 +18,8 @@ const SHARED_AGENT_TARGET_PREFIX = "shared-agent:";
 
 export interface LoadTuttiAgentCatalogInput extends Omit<TuttiCliJsonRequest, "args"> {
   runtime: LocalAgentRuntime<string, string>;
+  agentTargetId?: string;
+  refreshAvailability?: boolean;
 }
 
 export async function loadTuttiAgentCatalog(
@@ -30,9 +32,15 @@ export async function loadTuttiAgentCatalog(
   try {
     const payload = await runTuttiCliJson({
       ...input,
-      args: ["--json", "agent", "list"],
+      args: [
+        "--json",
+        "agent",
+        "list",
+        ...(input.agentTargetId ? ["--agent-id", input.agentTargetId] : []),
+        ...(input.refreshAvailability ? ["--refresh"] : []),
+      ],
     });
-    return parseCliAgentCatalog(payload, input.runtime, input.detectContext);
+    return parseCliAgentCatalog(payload, input.runtime, input.detectContext, input.agentTargetId);
   } catch (error) {
     if (!isMissingAgentIdContract(error)) throw error;
   }
@@ -66,6 +74,7 @@ function parseCliAgentCatalog(
   payload: unknown,
   runtime: Pick<LocalAgentRuntime<string, string>, "listProviders">,
   detectContext?: DetectContext,
+  requestedAgentTargetId?: string,
 ): TuttiAgentCatalog {
   if (!isRecord(payload)) {
     throw invalidCatalog("Tutti agent catalog is not an object.");
@@ -94,11 +103,16 @@ function parseCliAgentCatalog(
     }),
   );
   const defaultAgentTargetId = payload.defaultAgentTargetId.trim();
+  const requestedTarget = requestedAgentTargetId?.trim();
+  if (requestedTarget && (agents.length !== 1 || agents[0]?.agentTargetId !== requestedTarget)) {
+    throw invalidCatalog("Tutti filtered agent catalog does not match the requested Agent Target.");
+  }
   const defaultPresent = agents.some((agent) => agent.agentTargetId === defaultAgentTargetId);
   const defaultWasShared = isSharedAgentTargetId(defaultAgentTargetId);
   if (
-    (agents.length === 0 && defaultAgentTargetId !== "" && !defaultWasShared) ||
-    (agents.length > 0 && !defaultPresent && !defaultWasShared)
+    !requestedTarget &&
+    ((agents.length === 0 && defaultAgentTargetId !== "" && !defaultWasShared) ||
+      (agents.length > 0 && !defaultPresent && !defaultWasShared))
   ) {
     throw invalidCatalog("Tutti agent catalog defaultAgentTargetId is invalid.");
   }
@@ -157,10 +171,9 @@ function parseCatalogEntries(input: {
   displayNameField: string;
 }) {
   const runtimeProviderIds = new Set(
-    input.runtime.listProviders().flatMap((provider) => [
-      String(provider.id),
-      ...(provider.aliases ?? []).map(String),
-    ]),
+    input.runtime
+      .listProviders()
+      .flatMap((provider) => [String(provider.id), ...(provider.aliases ?? []).map(String)]),
   );
   const seen = new Set<string>();
   return input.values.map((value, index) => {

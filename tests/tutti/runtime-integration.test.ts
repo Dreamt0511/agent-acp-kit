@@ -226,27 +226,50 @@ describe("Tutti-aware runtime integration", () => {
         },
       ],
     };
-    const integration = createTuttiRuntimeIntegration({
-      runTuttiCli: async (args) => {
-        if (args.includes("list")) return extensionCatalog;
-        const agentTargetId = args[args.indexOf("--agent-id") + 1]!;
+    const runTuttiCli = vi.fn(async (args: string[]) => {
+      if (args.includes("list")) {
+        const targetIndex = args.indexOf("--agent-id");
+        if (targetIndex < 0) return extensionCatalog;
+        const targetId = args[targetIndex + 1]!;
+        const agent = extensionCatalog.agents.find(
+          (candidate) => candidate.id === targetId,
+        )!;
         return {
-          ...composer(agentTargetId),
-          providerId:
-            agentTargetId === "extension:hermes"
-              ? "acp:hermes"
-              : "acp:kimi-code",
+          ...extensionCatalog,
+          agents: [
+            targetId === "extension:hermes"
+              ? {
+                  ...agent,
+                  availability: {
+                    status: "unavailable",
+                    reasonCode: "auth_required",
+                    detail: "authentication required",
+                  },
+                }
+              : agent,
+          ],
         };
-      },
+      }
+      const agentTargetId = args[args.indexOf("--agent-id") + 1]!;
+      return {
+        ...composer(agentTargetId),
+        providerId:
+          agentTargetId === "extension:hermes" ? "acp:hermes" : "acp:kimi-code",
+      };
+    });
+    const integration = createTuttiRuntimeIntegration({
+      runTuttiCli,
     });
 
-    await expect(
-      integration.detect({ descriptors: extensionDescriptors }),
-    ).resolves.toMatchObject([
+    const extensionDetected = await integration.detect({
+      descriptors: extensionDescriptors,
+    });
+    expect(extensionDetected).toMatchObject([
       {
         agentTargetId: "extension:hermes",
         provider: "hermes",
-        supported: true,
+        supported: false,
+        authState: "missing",
       },
       {
         agentTargetId: "extension:kimi-code",
@@ -254,6 +277,24 @@ describe("Tutti-aware runtime integration", () => {
         supported: true,
       },
     ]);
+    await integration.detect({ descriptors: extensionDescriptors });
+    expect(
+      runTuttiCli.mock.calls.filter(
+        ([args]) => args.includes("list") && args.includes("--agent-id"),
+      ),
+    ).toHaveLength(2);
+
+    await integration.detect({
+      descriptors: extensionDescriptors,
+      context: { refresh: true },
+    });
+    const refreshedAvailabilityCalls = runTuttiCli.mock.calls.filter(
+      ([args]) =>
+        args.includes("list") &&
+        args.includes("--agent-id") &&
+        args.includes("--refresh"),
+    );
+    expect(refreshedAvailabilityCalls).toHaveLength(2);
     await expect(
       integration.prepareRun({
         descriptors: extensionDescriptors,

@@ -33,11 +33,15 @@ export function createTuttiRuntimeIntegration<
   prepareRun: TuttiRuntimeRunPreparer<TKind, TProvider>;
 } {
   const catalogCache = new Map<string, Promise<TuttiAgentCatalog>>();
+  const availabilityCache = new Map<string, Promise<TuttiAgentCatalogEntry>>();
   const composerCache = new Map<string, Promise<TuttiAgentComposerOptions>>();
 
   const clearScope = (scopeKey: string) => {
     catalogCache.delete(scopeKey);
     const prefix = `${scopeKey}\u0000`;
+    for (const key of availabilityCache.keys()) {
+      if (key.startsWith(prefix)) availabilityCache.delete(key);
+    }
     for (const key of composerCache.keys()) {
       if (key.startsWith(prefix)) composerCache.delete(key);
     }
@@ -66,6 +70,48 @@ export function createTuttiRuntimeIntegration<
       throw error;
     });
     catalogCache.set(input.scopeKey, request);
+    return request;
+  };
+
+  const loadAvailability = <
+    TLocalKind extends string,
+    TLocalProvider extends string,
+  >(input: {
+    scopeKey: string;
+    agentTargetId: string;
+    context?: DetectContext;
+    descriptors: RuntimeAgentDescriptor<TLocalKind, TLocalProvider>[];
+    env: NodeJS.ProcessEnv;
+  }) => {
+    const key = `${input.scopeKey}\u0000${input.agentTargetId}`;
+    const existing = availabilityCache.get(key);
+    if (existing) return existing;
+    const request = loadTuttiAgentCatalog({
+      runtime: descriptorRuntime(input.descriptors),
+      agentTargetId: input.agentTargetId,
+      refreshAvailability: input.context?.refresh === true,
+      cwd: input.context?.cwd,
+      detectContext: input.context,
+      env: input.env,
+      timeoutMs: 60_000,
+      ...(options.runTuttiCli ? { runTuttiCli: options.runTuttiCli } : {}),
+    })
+      .then((catalog) => {
+        const agent = catalog.agents.find(
+          (candidate) => candidate.agentTargetId === input.agentTargetId,
+        );
+        if (!agent) {
+          throw new Error(
+            `Agent Target ${input.agentTargetId} was not returned.`,
+          );
+        }
+        return agent;
+      })
+      .catch((error) => {
+        availabilityCache.delete(key);
+        throw error;
+      });
+    availabilityCache.set(key, request);
     return request;
   };
 
@@ -130,6 +176,14 @@ export function createTuttiRuntimeIntegration<
         context,
         descriptors,
         catalog,
+        loadAvailability: (agentTargetId) =>
+          loadAvailability({
+            scopeKey,
+            agentTargetId,
+            context,
+            descriptors,
+            env,
+          }),
         loadComposer: (agentTargetId) =>
           loadComposer({
             scopeKey,
@@ -203,11 +257,27 @@ async function detectTuttiTargets<
   context?: DetectContext;
   descriptors: RuntimeAgentDescriptor<TKind, TProvider>[];
   catalog: TuttiAgentCatalog;
+  loadAvailability(agentTargetId: string): Promise<TuttiAgentCatalogEntry>;
   loadComposer(agentTargetId: string): Promise<TuttiAgentComposerOptions>;
 }): Promise<Array<DetectedProvider<TProvider>>> {
   return await Promise.all(
     input.catalog.agents.map(
-      async (agent): Promise<DetectedProvider<TProvider>> => {
+      async (catalogAgent): Promise<DetectedProvider<TProvider>> => {
+        let agent = catalogAgent;
+        if (agent.agentTargetId.startsWith("extension:")) {
+          try {
+            agent = await input.loadAvailability(agent.agentTargetId);
+          } catch (error) {
+            return {
+              ...projectUnavailableTarget<TKind, TProvider>(
+                agent,
+                descriptorForProvider(input.descriptors, agent.providerId),
+                input.catalog.defaultAgentTargetId,
+              ),
+              reason: `Agent availability could not be loaded: ${safeErrorMessage(error)}`,
+            };
+          }
+        }
         const descriptor = descriptorForProvider(
           input.descriptors,
           agent.providerId,
@@ -275,10 +345,7 @@ function descriptorRuntime<TKind extends string, TProvider extends string>(
   };
 }
 
-function descriptorForProvider<
-  TKind extends string,
-  TProvider extends string,
->(
+function descriptorForProvider<TKind extends string, TProvider extends string>(
   descriptors: RuntimeAgentDescriptor<TKind, TProvider>[],
   providerId: string,
 ) {

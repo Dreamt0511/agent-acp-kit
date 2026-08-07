@@ -44,6 +44,19 @@ afterEach(async () => {
 });
 
 describe("runTuttiCliJson", () => {
+  it("allows setup-backed agent catalog requests to use the one minute default budget", async () => {
+    let observedTimeoutMs = 0;
+    await runTuttiCliJson({
+      args: ["--json", "agent", "list"],
+      runTuttiCli: async (_args, options) => {
+        observedTimeoutMs = options.timeoutMs;
+        return {};
+      },
+    });
+
+    expect(observedTimeoutMs).toBe(60_000);
+  });
+
   it("executes argv without a shell and parses JSON", async () => {
     const command = await executable(
       `process.stdout.write(JSON.stringify({ argv: process.argv.slice(2) }));`,

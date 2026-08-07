@@ -436,6 +436,13 @@ standalone no-argument detection is cached per Provider. After the catalog,
 credentials, models, or local CLI installation changes, call
 `runtime.detect({ refresh: true })` to refresh it.
 
+For Agent Extensions, Tutti detection refines the broad catalog with one exact
+`agent list --agent-id <agent-id>` availability request per target. These
+requests and the initial broad catalog request have a one-minute client timeout.
+Exact availability results are cached per runtime scope;
+`runtime.detect({ refresh: true })` clears that cache and asks the daemon to
+refresh its short-lived, coalesced authentication probe.
+
 Provider behavior differs:
 
 - Codex: attempts dynamic discovery with `codex debug models`, then falls back to bundled or package model hints.

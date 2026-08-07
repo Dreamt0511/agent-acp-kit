@@ -157,7 +157,10 @@ function parseCatalogEntries(input: {
   displayNameField: string;
 }) {
   const runtimeProviderIds = new Set(
-    input.runtime.listProviders().map((provider) => String(provider.id)),
+    input.runtime.listProviders().flatMap((provider) => [
+      String(provider.id),
+      ...(provider.aliases ?? []).map(String),
+    ]),
   );
   const seen = new Set<string>();
   return input.values.map((value, index) => {

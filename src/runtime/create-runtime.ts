@@ -42,6 +42,7 @@ export type LocalAgentRuntime<
   detect(context?: DetectContext): Promise<Array<DetectedProvider<TProvider>>>;
   listProviders(): Array<{
     id: TProvider;
+    aliases?: readonly string[];
     displayName: string;
     kind: TKind;
     requiresKnownAuth?: boolean;
@@ -54,6 +55,7 @@ export type RuntimeAgentDescriptor<
   TProvider extends string,
 > = {
   id: TProvider;
+  aliases?: readonly string[];
   displayName: string;
   kind: TKind;
   requiresKnownAuth: boolean;
@@ -277,6 +279,7 @@ export function createLocalAgentRuntime<
     createDetectionCache<ProviderDetectionResult<TKind, TProvider>>();
   const descriptors = options.providers.map((provider) => ({
     id: provider.id,
+    ...(provider.aliases?.length ? { aliases: [...provider.aliases] } : {}),
     displayName: provider.displayName,
     kind: provider.kind,
     requiresKnownAuth: provider.requiresKnownAuth === true,
@@ -358,6 +361,7 @@ export function createLocalAgentRuntime<
     listProviders() {
       return options.providers.map((provider) => ({
         id: provider.id,
+        ...(provider.aliases?.length ? { aliases: [...provider.aliases] } : {}),
         displayName: provider.displayName,
         kind: provider.kind,
         ...(provider.requiresKnownAuth ? { requiresKnownAuth: true } : {}),

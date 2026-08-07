@@ -181,7 +181,8 @@ export function createTuttiRuntimeIntegration<
       }),
       run.signal,
     );
-    if (composer.providerId !== String(run.provider)) {
+    const descriptor = descriptorForProvider(descriptors, composer.providerId);
+    if (!descriptor || String(descriptor.id) !== String(run.provider)) {
       throw new Error(
         `Agent Target provider mismatch: ${run.agentTargetId} resolves to ${composer.providerId}, got ${String(run.provider)}.`,
       );
@@ -204,13 +205,13 @@ async function detectTuttiTargets<
   catalog: TuttiAgentCatalog;
   loadComposer(agentTargetId: string): Promise<TuttiAgentComposerOptions>;
 }): Promise<Array<DetectedProvider<TProvider>>> {
-  const descriptorByProvider = new Map(
-    input.descriptors.map((descriptor) => [String(descriptor.id), descriptor]),
-  );
   return await Promise.all(
     input.catalog.agents.map(
       async (agent): Promise<DetectedProvider<TProvider>> => {
-        const descriptor = descriptorByProvider.get(agent.providerId);
+        const descriptor = descriptorForProvider(
+          input.descriptors,
+          agent.providerId,
+        );
         if (!descriptor || !agent.runtimeSupported) {
           return projectUnavailableTarget<TKind, TProvider>(
             agent,
@@ -256,6 +257,9 @@ function descriptorRuntime<TKind extends string, TProvider extends string>(
     listProviders: () =>
       descriptors.map((descriptor) => ({
         id: String(descriptor.id),
+        ...(descriptor.aliases?.length
+          ? { aliases: [...descriptor.aliases] }
+          : {}),
         displayName: descriptor.displayName,
         kind: String(descriptor.kind),
         ...(descriptor.requiresKnownAuth ? { requiresKnownAuth: true } : {}),
@@ -269,6 +273,20 @@ function descriptorRuntime<TKind extends string, TProvider extends string>(
       throw new Error("not used");
     }) as LocalAgentRuntime<string, string>["run"],
   };
+}
+
+function descriptorForProvider<
+  TKind extends string,
+  TProvider extends string,
+>(
+  descriptors: RuntimeAgentDescriptor<TKind, TProvider>[],
+  providerId: string,
+) {
+  return descriptors.find(
+    (descriptor) =>
+      String(descriptor.id) === providerId ||
+      descriptor.aliases?.includes(providerId),
+  );
 }
 
 function projectAvailableTarget<TKind extends string, TProvider extends string>(

@@ -20,6 +20,8 @@ describe("public api", () => {
       "codex",
       "claude-code",
       "tutti-agent",
+      "hermes",
+      "kimi",
       "opencode",
       "cursor",
     ]);

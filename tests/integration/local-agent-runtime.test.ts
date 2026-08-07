@@ -34,7 +34,12 @@ describe("createLocalAgentRuntime", () => {
     };
     const runtime = createLocalAgentRuntime({ providers: [provider] });
     expect(runtime.listProviders()).toEqual([
-      { id: "canonical", displayName: "Canonical", kind: "local-agent" },
+      {
+        id: "canonical",
+        aliases: ["legacy"],
+        displayName: "Canonical",
+        kind: "local-agent",
+      },
     ]);
 
     const events: AgentEvent[] = [];

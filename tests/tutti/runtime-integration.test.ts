@@ -186,6 +186,92 @@ describe("Tutti-aware runtime integration", () => {
     ).toHaveLength(2);
   });
 
+  it("maps Tutti extension provider aliases to canonical runtime providers", async () => {
+    const extensionDescriptors: RuntimeAgentDescriptor<
+      "local-agent",
+      string
+    >[] = [
+      {
+        id: "hermes",
+        aliases: ["acp:hermes"],
+        displayName: "Hermes",
+        kind: "local-agent",
+        requiresKnownAuth: false,
+      },
+      {
+        id: "kimi",
+        aliases: ["kimi-code", "acp:kimi-code"],
+        displayName: "Kimi CLI",
+        kind: "local-agent",
+        requiresKnownAuth: false,
+      },
+    ];
+    const extensionCatalog = {
+      schemaVersion: 1,
+      defaultAgentTargetId: "extension:hermes",
+      agents: [
+        {
+          id: "extension:hermes",
+          name: "Hermes Agent",
+          provider: "acp:hermes",
+          executablePath: "/resolved/bin/hermes",
+          availability: { status: "available", reasonCode: "", detail: "" },
+        },
+        {
+          id: "extension:kimi-code",
+          name: "Kimi Code",
+          provider: "acp:kimi-code",
+          executablePath: "/resolved/bin/kimi",
+          availability: { status: "available", reasonCode: "", detail: "" },
+        },
+      ],
+    };
+    const integration = createTuttiRuntimeIntegration({
+      runTuttiCli: async (args) => {
+        if (args.includes("list")) return extensionCatalog;
+        const agentTargetId = args[args.indexOf("--agent-id") + 1]!;
+        return {
+          ...composer(agentTargetId),
+          providerId:
+            agentTargetId === "extension:hermes"
+              ? "acp:hermes"
+              : "acp:kimi-code",
+        };
+      },
+    });
+
+    await expect(
+      integration.detect({ descriptors: extensionDescriptors }),
+    ).resolves.toMatchObject([
+      {
+        agentTargetId: "extension:hermes",
+        provider: "hermes",
+        supported: true,
+      },
+      {
+        agentTargetId: "extension:kimi-code",
+        provider: "kimi",
+        supported: true,
+      },
+    ]);
+    await expect(
+      integration.prepareRun({
+        descriptors: extensionDescriptors,
+        env: { TUTTI_CLI: "/usr/bin/tutti-cli" },
+        run: {
+          agentTargetId: "extension:kimi-code",
+          runId: "run-kimi-extension",
+          provider: "kimi",
+          cwd: "/workspace/project",
+          prompt: "hello",
+        },
+      }),
+    ).resolves.toMatchObject({
+      provider: "kimi",
+      executablePath: "/resolved/bin/kimi",
+    });
+  });
+
   it("single-flights and caches Tutti detection until refresh", async () => {
     const runTuttiCli = vi.fn(async (args: string[]) =>
       args.includes("list")

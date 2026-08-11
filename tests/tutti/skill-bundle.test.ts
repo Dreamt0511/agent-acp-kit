@@ -61,7 +61,13 @@ describe("Tutti skill bundle helpers", () => {
     });
 
     expect(calls).toHaveLength(2);
-    expect(calls[0]?.args).toEqual(["--json", "agent", "list"]);
+    expect(calls[0]?.args).toEqual([
+      "--json",
+      "agent",
+      "list",
+      "--agent-id",
+      "local:codex",
+    ]);
     expect(calls[1]?.args).toEqual([
       "--json",
       "agent",
@@ -114,7 +120,7 @@ describe("Tutti skill bundle helpers", () => {
       },
     });
     expect(calls).toEqual([
-      ["--json", "agent", "list"],
+      ["--json", "agent", "list", "--agent-id", "local:codex"],
       ["--json", "agent", "providers"],
       ["--json", "agent", "tutti-cli-skill-bundle", "--provider", "codex"],
     ]);
@@ -122,6 +128,96 @@ describe("Tutti skill bundle helpers", () => {
       schemaVersion: 2,
       agentTargetId: "local:codex",
       providerId: "codex",
+    });
+  });
+
+  it.each([
+    ["extension:hermes", "acp:hermes", "hermes"],
+    ["extension:kimi-code", "acp:kimi-code", "kimi"],
+  ])(
+    "keeps %s target, wire provider, and runtime provider identities distinct",
+    async (agentTargetId, wireProviderId, runtimeProviderId) => {
+      const calls: string[][] = [];
+      const bundle = await loadTuttiAgentSkillBundle({
+        agentTargetId,
+        runTuttiCli: async (args) => {
+          calls.push(args);
+          if (args.includes("list")) {
+            return {
+              schemaVersion: 1,
+              defaultAgentTargetId: agentTargetId,
+              agents: [
+                {
+                  id: agentTargetId,
+                  name: agentTargetId,
+                  provider: wireProviderId,
+                  availability: { status: "available", reasonCode: "", detail: "" },
+                },
+              ],
+            };
+          }
+          return {
+            schemaVersion: 2,
+            agentTargetId,
+            provider: wireProviderId,
+            skills: [],
+          };
+        },
+      });
+
+      expect(calls[1]).toEqual([
+        "--json",
+        "agent",
+        "tutti-cli-skill-bundle",
+        "--agent-id",
+        agentTargetId,
+      ]);
+      expect(bundle).toMatchObject({
+        agentTargetId,
+        providerId: runtimeProviderId,
+        wireProviderId,
+      });
+    },
+  );
+
+  it("uses the old daemon's raw extension provider id without leaking it as runtime identity", async () => {
+    const calls: string[][] = [];
+    const bundle = await loadTuttiAgentSkillBundle({
+      agentTargetId: "extension:kimi-code",
+      runTuttiCli: async (args) => {
+        calls.push(args);
+        if (args.includes("list")) {
+          throw new TuttiIntegrationError("unsupported_command", "unknown command");
+        }
+        if (args.includes("providers")) {
+          return {
+            schemaVersion: 2,
+            defaultProviderId: "acp:kimi-code",
+            providers: [
+              {
+                providerId: "acp:kimi-code",
+                displayName: "Kimi Code",
+                agentTargetId: "extension:kimi-code",
+                availability: { status: "available", reasonCode: "", detail: "" },
+              },
+            ],
+          };
+        }
+        return { schemaVersion: 1, provider: "acp:kimi-code", skills: [] };
+      },
+    });
+
+    expect(calls[2]).toEqual([
+      "--json",
+      "agent",
+      "tutti-cli-skill-bundle",
+      "--provider",
+      "acp:kimi-code",
+    ]);
+    expect(bundle).toMatchObject({
+      agentTargetId: "extension:kimi-code",
+      providerId: "kimi",
+      wireProviderId: "acp:kimi-code",
     });
   });
 
@@ -165,7 +261,62 @@ describe("Tutti skill bundle helpers", () => {
         },
       }),
     ).rejects.toMatchObject({ code: "cli_execution_failed" });
-    expect(calls).toEqual([["--json", "agent", "list"]]);
+    expect(calls).toEqual([
+      ["--json", "agent", "list", "--agent-id", "local:codex"],
+    ]);
+  });
+
+  it("uses a lifecycle-sized timeout for exact-target skill preparation", async () => {
+    const observed: Array<{ args: string[]; timeoutMs: number }> = [];
+    await loadTuttiAgentSkillBundle({
+      agentTargetId: "extension:hermes",
+      runTuttiCli: async (args, options) => {
+        observed.push({ args, timeoutMs: options.timeoutMs });
+        if (args.includes("list")) {
+          return {
+            schemaVersion: 1,
+            defaultAgentTargetId: "extension:hermes",
+            agents: [
+              {
+                id: "extension:hermes",
+                name: "Hermes Agent",
+                provider: "acp:hermes",
+                availability: { status: "available", reasonCode: "", detail: "" },
+              },
+            ],
+          };
+        }
+        return {
+          schemaVersion: 2,
+          agentTargetId: "extension:hermes",
+          provider: "acp:hermes",
+          skills: [],
+        };
+      },
+    });
+
+    expect(observed).toEqual([
+      {
+        args: [
+          "--json",
+          "agent",
+          "list",
+          "--agent-id",
+          "extension:hermes",
+        ],
+        timeoutMs: 60_000,
+      },
+      {
+        args: [
+          "--json",
+          "agent",
+          "tutti-cli-skill-bundle",
+          "--agent-id",
+          "extension:hermes",
+        ],
+        timeoutMs: 60_000,
+      },
+    ]);
   });
 
   it("returns an empty bundle when no command is configured", async () => {
@@ -268,6 +419,31 @@ describe("Tutti skill bundle helpers", () => {
         skills: [],
       }).provider,
     ).toBe("claude-code");
+  });
+
+  it("preserves a deprecated provider-only extension alias on the old daemon wire", async () => {
+    const calls: string[][] = [];
+    const bundle = await loadTuttiAgentSkillBundle({
+      provider: "acp:kimi-code",
+      runTuttiCli: async (args) => {
+        calls.push(args);
+        return { schemaVersion: 1, provider: "acp:kimi-code", skills: [] };
+      },
+    });
+
+    expect(calls).toEqual([
+      [
+        "--json",
+        "agent",
+        "tutti-cli-skill-bundle",
+        "--provider",
+        "acp:kimi-code",
+      ],
+    ]);
+    expect(bundle).toMatchObject({
+      providerId: "kimi",
+      wireProviderId: "acp:kimi-code",
+    });
   });
 
   it("parses skill bundle JSON strictly", () => {

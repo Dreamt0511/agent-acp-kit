@@ -7,7 +7,11 @@ import {
 } from "./cli-json-runner.js";
 import { isMissingAgentIdContract } from "./agent-catalog.js";
 import type { TuttiAgentIntegrationSource } from "./contracts.js";
-import { canonicalTuttiProviderId } from "./internal.js";
+import {
+  canonicalTuttiProviderId,
+  type TuttiProviderIdentity,
+} from "./internal.js";
+import { resolveOfficialTuttiProvider } from "./provider-identity.js";
 
 export { TuttiIntegrationError, resolveTuttiCliCommand } from "./cli-json-runner.js";
 export { projectTuttiCliChildProcess, redactTuttiCliChildProcessText } from "./child-process.js";
@@ -38,7 +42,7 @@ export {
 export type { LoadTuttiAgentComposerOptionsInput } from "./composer-options.js";
 export * from "./contracts.js";
 
-const DEFAULT_TUTTI_SKILL_BUNDLE_TIMEOUT_MS = 10_000;
+const DEFAULT_TUTTI_SKILL_BUNDLE_TIMEOUT_MS = 60_000;
 const DEFAULT_TUTTI_SKILL_BUNDLE_MAX_BUFFER = 1024 * 1024;
 
 export interface TuttiRecommendedSystemPrompt {
@@ -51,6 +55,8 @@ export interface TuttiAgentSkillBundle {
   agentSessionId?: string;
   cliCommand?: string;
   providerId?: string;
+  /** Exact provider id exchanged with the Tutti daemon. */
+  wireProviderId?: string;
   /** @deprecated Use providerId. */
   provider?: string;
   recommendedSystemPrompt?: TuttiRecommendedSystemPrompt;
@@ -88,7 +94,12 @@ export async function loadTuttiAgentSkillBundle(
     return { source: "standalone", skills: [] };
   }
   const requestedAgentTargetId = normalizeOptionalString(input.agentTargetId);
-  const legacyProviderId = canonicalTuttiProviderId(normalizeOptionalString(input.provider) ?? "");
+  const legacyWireProviderId = normalizeOptionalString(input.provider) ?? "";
+  const legacyIdentity = resolveOfficialTuttiProvider(legacyWireProviderId);
+  const legacyProvider = {
+    ...legacyIdentity,
+    wireProviderId: canonicalTuttiProviderId(legacyWireProviderId),
+  };
   const maxBuffer = input.maxBuffer ?? DEFAULT_TUTTI_SKILL_BUNDLE_MAX_BUFFER;
   const timeoutMs = input.timeoutMs ?? DEFAULT_TUTTI_SKILL_BUNDLE_TIMEOUT_MS;
   const cwd = normalizeOptionalString(input.cwd);
@@ -107,11 +118,17 @@ export async function loadTuttiAgentSkillBundle(
       timeoutMs,
     });
 
-  let selection: { agentTargetId?: string; providerId: string };
+  let selection: ({ agentTargetId?: string } & TuttiProviderIdentity);
   let payload: unknown;
   if (requestedAgentTargetId) {
     try {
-      const catalogPayload = await request(["--json", "agent", "list"]);
+      const catalogPayload = await request([
+        "--json",
+        "agent",
+        "list",
+        "--agent-id",
+        requestedAgentTargetId,
+      ]);
       selection = resolveAgentListSkillSelection(catalogPayload, requestedAgentTargetId);
       payload = await request(
         createTuttiAgentSkillBundleArgs(input, "--agent-id", requestedAgentTargetId),
@@ -121,16 +138,16 @@ export async function loadTuttiAgentSkillBundle(
       const legacyCatalogPayload = await request(["--json", "agent", "providers"]);
       selection = resolveLegacySkillSelection(legacyCatalogPayload, requestedAgentTargetId);
       payload = await request(
-        createTuttiAgentSkillBundleArgs(input, "--provider", selection.providerId),
+        createTuttiAgentSkillBundleArgs(input, "--provider", selection.wireProviderId),
       );
     }
   } else {
-    if (!legacyProviderId) {
+    if (!legacyProvider.runtimeProviderId) {
       throw invalidSkillBundle("Tutti skill bundle requires an exact agentTargetId");
     }
-    selection = { providerId: legacyProviderId };
+    selection = legacyProvider;
     payload = await request(
-      createTuttiAgentSkillBundleArgs(input, "--provider", selection.providerId),
+      createTuttiAgentSkillBundleArgs(input, "--provider", selection.wireProviderId),
     );
   }
 
@@ -166,7 +183,7 @@ function resolveAgentListSkillSelection(payload: unknown, agentTargetId: string)
   }
   return {
     agentTargetId,
-    providerId: canonicalTuttiProviderId(provider),
+    ...resolveOfficialTuttiProvider(provider),
   };
 }
 
@@ -191,20 +208,22 @@ function resolveLegacySkillSelection(payload: unknown, agentTargetId: string) {
   if (!provider) {
     throw invalidSkillBundle("Tutti legacy provider metadata is invalid");
   }
-  const providerId = canonicalTuttiProviderId(provider);
+  const identity = resolveOfficialTuttiProvider(provider);
   const providerMatches = payload.providers.filter(
     (value) =>
       isRecord(value) &&
-      canonicalTuttiProviderId(normalizeUnknownString(value.providerId) ?? "") === providerId,
+      resolveOfficialTuttiProvider(normalizeUnknownString(value.providerId) ?? "")
+        .runtimeProviderId ===
+        identity.runtimeProviderId,
   );
   if (providerMatches.length !== 1) {
     throw new TuttiIntegrationError(
       "agent_ambiguous",
       "The old Tutti daemon cannot select this exact agent because its provider is shared.",
-      { agentTargetId, providerId },
+      { agentTargetId, providerId: identity.runtimeProviderId },
     );
   }
-  return { agentTargetId, providerId };
+  return { agentTargetId, ...identity };
 }
 
 export async function loadTuttiAgentSkillContext(
@@ -237,7 +256,7 @@ export function parseTuttiAgentSkillBundle(value: unknown): TuttiAgentSkillBundl
   if (!rawProvider) {
     throw invalidSkillBundle("Tutti skill bundle response does not contain a valid provider");
   }
-  const provider = canonicalTuttiProviderId(rawProvider);
+  const providerIdentity = resolveOfficialTuttiProvider(rawProvider);
   const agentTargetId = normalizeUnknownString(payload.agentTargetId);
   if (payload.schemaVersion === 2 && !agentTargetId) {
     throw invalidSkillBundle("Tutti skill bundle response does not contain a valid agentTargetId");
@@ -255,8 +274,9 @@ export function parseTuttiAgentSkillBundle(value: unknown): TuttiAgentSkillBundl
     source: "tutti-cli",
     schemaVersion: payload.schemaVersion,
     ...(agentTargetId ? { agentTargetId } : {}),
-    providerId: provider,
-    provider,
+    providerId: providerIdentity.runtimeProviderId,
+    wireProviderId: providerIdentity.wireProviderId,
+    provider: providerIdentity.runtimeProviderId,
     ...(normalizeUnknownString(payload.agentSessionId)
       ? { agentSessionId: normalizeUnknownString(payload.agentSessionId) }
       : {}),
@@ -294,11 +314,11 @@ function createTuttiAgentSkillBundleArgs(
 function assertTuttiAgentSkillBundleMatchesInput(
   bundle: TuttiAgentSkillBundle,
   input: LoadTuttiAgentSkillBundleInput,
-  selection: { agentTargetId?: string; providerId: string },
+  selection: ({ agentTargetId?: string } & TuttiProviderIdentity),
 ) {
-  if (bundle.providerId !== selection.providerId) {
+  if (bundle.providerId !== selection.runtimeProviderId) {
     throw invalidSkillBundle(
-      `Tutti skill bundle provider mismatch: expected ${selection.providerId}, got ${bundle.providerId ?? ""}`,
+      `Tutti skill bundle provider mismatch: expected ${selection.runtimeProviderId}, got ${bundle.providerId ?? ""}`,
     );
   }
   if (selection.agentTargetId && bundle.agentTargetId !== selection.agentTargetId) {

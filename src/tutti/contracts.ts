@@ -24,7 +24,10 @@ export type TuttiAgentCliContract = "agent-id" | "provider-compat";
 
 export interface TuttiAgentCatalogEntry {
   agentTargetId: string;
+  /** Canonical provider id accepted by the local runtime. */
   providerId: string;
+  /** Exact provider id returned by or sent to the Tutti daemon. */
+  wireProviderId?: string;
   displayName: string;
   executablePath?: string;
   availability: TuttiAgentProviderAvailability;
@@ -79,6 +82,7 @@ export interface TuttiAgentComposerOptions {
   source: TuttiAgentIntegrationSource;
   agentTargetId: string;
   providerId: string;
+  wireProviderId?: string;
   effectiveSettings: Record<string, unknown>;
   modelConfig: TuttiAgentComposerConfig;
   permissionConfig: TuttiAgentPermissionConfig;
@@ -124,6 +128,7 @@ export function isTuttiAgentComposerOptions(value: unknown): value is TuttiAgent
     (value.source === "tutti-cli" || value.source === "standalone") &&
     isNonEmptyString(value.agentTargetId) &&
     typeof value.providerId === "string" &&
+    (value.wireProviderId === undefined || isNonEmptyString(value.wireProviderId)) &&
     isRecord(value.effectiveSettings) &&
     isComposerConfig(value.modelConfig) &&
     isPermissionConfig(value.permissionConfig) &&
@@ -137,6 +142,7 @@ function isAgentCatalogEntry(value: unknown) {
     isRecord(value) &&
     isNonEmptyString(value.agentTargetId) &&
     isCanonicalProviderId(value.providerId) &&
+    (value.wireProviderId === undefined || isNonEmptyString(value.wireProviderId)) &&
     isNonEmptyString(value.displayName) &&
     (value.executablePath === undefined || isNonEmptyString(value.executablePath)) &&
     typeof value.runtimeSupported === "boolean" &&

@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 
 import type { LocalAgentRuntime } from "../../src/runtime/create-runtime.js";
-import { loadTuttiAgentComposerOptions, TuttiIntegrationError } from "../../src/tutti/index.js";
+import {
+  loadTuttiAgentComposerOptions,
+  parseTuttiAgentComposerOptions,
+  TuttiIntegrationError,
+} from "../../src/tutti/index.js";
 
 function runtime(): LocalAgentRuntime<string, string> {
   return {
@@ -66,6 +70,27 @@ const cliComposer = {
 };
 
 describe("Tutti composer options", () => {
+  it("accepts another official alias for the same runtime provider", () => {
+    expect(
+      parseTuttiAgentComposerOptions(
+        {
+          ...cliComposer,
+          agentTargetId: "extension:kimi-code",
+          provider: "kimi-code",
+        },
+        {
+          agentTargetId: "extension:kimi-code",
+          providerId: "kimi",
+          wireProviderId: "acp:kimi-code",
+        },
+      ),
+    ).toMatchObject({
+      agentTargetId: "extension:kimi-code",
+      providerId: "kimi",
+      wireProviderId: "kimi-code",
+    });
+  });
+
   it("loads options by exact agent id on the new contract", async () => {
     const calls: string[][] = [];
     const timeouts: number[] = [];

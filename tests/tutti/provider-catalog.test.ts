@@ -11,6 +11,7 @@ function fakeRuntime(
   input: {
     providers?: Array<{
       id: string;
+      aliases?: readonly string[];
       displayName: string;
       kind: string;
       requiresKnownAuth?: boolean;
@@ -106,6 +107,40 @@ describe("Tutti agent catalog", () => {
     });
     expect(catalog.agents[1]?.executablePath).toBe("/resolved/bin/codex");
     expect(catalog.agents.some((agent) => agent.providerId === "claude-code")).toBe(false);
+  });
+
+  it("projects extension wire providers onto canonical runtime providers", async () => {
+    const catalog = await loadTuttiAgentCatalog({
+      runtime: fakeRuntime({
+        providers: [
+          {
+            id: "kimi",
+            aliases: ["kimi-code", "acp:kimi-code"],
+            displayName: "Kimi Code",
+            kind: "local-agent",
+          },
+        ],
+      }),
+      runTuttiCli: async () => ({
+        schemaVersion: 1,
+        defaultAgentTargetId: "extension:kimi-code",
+        agents: [
+          {
+            id: "extension:kimi-code",
+            name: "Kimi Code",
+            provider: "acp:kimi-code",
+            availability: { status: "available", reasonCode: "", detail: "" },
+          },
+        ],
+      }),
+    });
+
+    expect(catalog.agents[0]).toMatchObject({
+      agentTargetId: "extension:kimi-code",
+      providerId: "kimi",
+      wireProviderId: "acp:kimi-code",
+      runtimeSupported: true,
+    });
   });
 
   it("preserves the daemon default instead of guessing from availability or order", async () => {

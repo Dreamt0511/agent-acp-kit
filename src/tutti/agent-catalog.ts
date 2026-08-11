@@ -11,7 +11,11 @@ import type {
   TuttiAgentCatalogEntry,
   TuttiAgentProviderAvailability,
 } from "./contracts.js";
-import { canonicalTuttiProviderId, isRecord, optionalString } from "./internal.js";
+import {
+  createTuttiProviderResolver,
+  isRecord,
+  optionalString,
+} from "./internal.js";
 
 /** TSH shared-agent targets are not supported by this kit's local runtime path. */
 const SHARED_AGENT_TARGET_PREFIX = "shared-agent:";
@@ -155,9 +159,12 @@ function parseLegacyProviderCatalog(
       displayNameField: "displayName",
     }),
   );
-  const requestedDefaultProvider = canonicalTuttiProviderId(
-    optionalString(payload.defaultProviderId) ?? "",
-  );
+  const requestedDefaultProvider = createTuttiProviderResolver(
+    runtime.listProviders().map((provider) => ({
+      id: String(provider.id),
+      ...(provider.aliases?.length ? { aliases: provider.aliases.map(String) } : {}),
+    })),
+  ).resolve(optionalString(payload.defaultProviderId) ?? "").runtimeProviderId;
   const preferred = uniqueAgentForProvider(agents, requestedDefaultProvider);
   return normalizedCatalog(agents, "tutti-cli", "provider-compat", preferred?.agentTargetId);
 }
@@ -170,11 +177,13 @@ function parseCatalogEntries(input: {
   providerIdField: string;
   displayNameField: string;
 }) {
-  const runtimeProviderIds = new Set(
-    input.runtime
-      .listProviders()
-      .flatMap((provider) => [String(provider.id), ...(provider.aliases ?? []).map(String)]),
+  const resolver = createTuttiProviderResolver(
+    input.runtime.listProviders().map((provider) => ({
+      id: String(provider.id),
+      ...(provider.aliases?.length ? { aliases: provider.aliases.map(String) } : {}),
+    })),
   );
+  const runtimeProviderIds = new Set(input.runtime.listProviders().map((provider) => String(provider.id)));
   const seen = new Set<string>();
   return input.values.map((value, index) => {
     if (!isRecord(value)) {
@@ -188,7 +197,7 @@ function parseCatalogEntries(input: {
       throw invalidCatalog(`Tutti agent catalog contains duplicate agent ${agentTargetId}.`);
     }
     seen.add(agentTargetId);
-    const providerId = canonicalTuttiProviderId(
+    const { runtimeProviderId: providerId, wireProviderId } = resolver.resolve(
       requiredString(value[input.providerIdField], `agents[${index}].providerId`),
     );
     const runtimeRegistered = runtimeProviderIds.has(providerId);
@@ -205,6 +214,7 @@ function parseCatalogEntries(input: {
     return {
       agentTargetId,
       providerId,
+      wireProviderId,
       displayName: requiredString(value[input.displayNameField], `agents[${index}].displayName`),
       ...(executablePath ? { executablePath } : {}),
       availability,
@@ -228,6 +238,7 @@ async function loadStandaloneAgentCatalog(
     return {
       agentTargetId: `local:${providerId}`,
       providerId,
+      wireProviderId: providerId,
       displayName: descriptor.displayName,
       availability: standaloneAvailability(byProvider.get(providerId)),
       runtimeSupported,

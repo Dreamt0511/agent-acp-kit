@@ -16,7 +16,8 @@ import {
   type TuttiCliJsonRequest,
 } from "./cli-json-runner.js";
 import { loadTuttiAgentCatalog } from "./agent-catalog.js";
-import { canonicalTuttiProviderId, isRecord, optionalString } from "./internal.js";
+import { isRecord, optionalString } from "./internal.js";
+import { resolveOfficialTuttiProvider } from "./provider-identity.js";
 
 const DEFAULT_TUTTI_COMPOSER_TIMEOUT_MS = 45_000;
 
@@ -58,7 +59,11 @@ export async function loadTuttiAgentComposerOptionsWithCatalog(
     throw new TuttiIntegrationError(
       "provider_runtime_unavailable",
       "The installed agent-acp-kit cannot execute this agent runtime.",
-      { agentTargetId: agent.agentTargetId, providerId: agent.providerId },
+      {
+        agentTargetId: agent.agentTargetId,
+        providerId: agent.providerId,
+        wireProviderId: agent.wireProviderId ?? agent.providerId,
+      },
     );
   }
   if (
@@ -68,7 +73,11 @@ export async function loadTuttiAgentComposerOptionsWithCatalog(
     throw new TuttiIntegrationError(
       "agent_ambiguous",
       "The old Tutti daemon cannot select this exact agent because its provider is shared.",
-      { agentTargetId: agent.agentTargetId, providerId: agent.providerId },
+      {
+        agentTargetId: agent.agentTargetId,
+        providerId: agent.providerId,
+        wireProviderId: agent.wireProviderId ?? agent.providerId,
+      },
     );
   }
 
@@ -85,7 +94,8 @@ export async function loadTuttiAgentComposerOptionsWithCatalog(
 
 export function parseTuttiAgentComposerOptions(
   payload: unknown,
-  expectedAgent: Pick<TuttiAgentCatalogEntry, "agentTargetId" | "providerId">,
+  expectedAgent: Pick<TuttiAgentCatalogEntry, "agentTargetId" | "providerId"> &
+    Partial<Pick<TuttiAgentCatalogEntry, "wireProviderId">>,
   source: "tutti-cli" | "standalone" = "tutti-cli",
 ): TuttiAgentComposerOptions {
   if (!isRecord(payload)) throw invalidComposer("Tutti composer response is not an object.");
@@ -98,10 +108,14 @@ export function parseTuttiAgentComposerOptions(
       },
     );
   }
-  const providerId = canonicalTuttiProviderId(
-    optionalString(payload.providerId) ?? optionalString(payload.provider) ?? "",
-  );
-  if (!providerId || providerId !== expectedAgent.providerId) {
+  const responseProviderId =
+    optionalString(payload.providerId) ?? optionalString(payload.provider) ?? "";
+  const responseRuntimeProviderId =
+    resolveOfficialTuttiProvider(responseProviderId).runtimeProviderId;
+  if (
+    !responseProviderId ||
+    responseRuntimeProviderId !== expectedAgent.providerId
+  ) {
     throw invalidComposer("Tutti composer response provider does not match the request.");
   }
   const responseAgentTargetId = optionalString(payload.agentTargetId);
@@ -112,7 +126,8 @@ export function parseTuttiAgentComposerOptions(
     schemaVersion: 2,
     source,
     agentTargetId: expectedAgent.agentTargetId,
-    providerId,
+    providerId: expectedAgent.providerId,
+    wireProviderId: responseProviderId,
     effectiveSettings: isRecord(payload.effectiveSettings) ? payload.effectiveSettings : {},
     modelConfig: parseComposerConfig(payload.modelConfig, "modelConfig"),
     permissionConfig: parsePermissionConfig(payload.permissionConfig),
@@ -123,7 +138,7 @@ export function parseTuttiAgentComposerOptions(
 
 async function standaloneComposerOptions(
   runtime: LocalAgentRuntime<string, string>,
-  agent: Pick<TuttiAgentCatalogEntry, "agentTargetId" | "providerId">,
+  agent: Pick<TuttiAgentCatalogEntry, "agentTargetId" | "providerId" | "wireProviderId">,
   selectedModel?: string,
   detectContext?: DetectContext,
 ): Promise<TuttiAgentComposerOptions> {
@@ -144,6 +159,7 @@ async function standaloneComposerOptions(
     source: "standalone",
     agentTargetId: agent.agentTargetId,
     providerId: agent.providerId,
+    wireProviderId: agent.wireProviderId ?? agent.providerId,
     effectiveSettings: currentValue ? { model: currentValue } : {},
     modelConfig: {
       configurable: options.length > 0,
@@ -159,7 +175,10 @@ async function standaloneComposerOptions(
 
 function createComposerArgs(
   input: LoadTuttiAgentComposerOptionsInput,
-  agent: Pick<TuttiAgentCatalogEntry, "agentTargetId" | "providerId">,
+  agent: Pick<
+    TuttiAgentCatalogEntry,
+    "agentTargetId" | "providerId" | "wireProviderId"
+  >,
   cliContract: TuttiAgentCatalog["cliContract"],
 ) {
   return [
@@ -167,7 +186,9 @@ function createComposerArgs(
     "agent",
     "composer-options",
     cliContract === "agent-id" ? "--agent-id" : "--provider",
-    cliContract === "agent-id" ? agent.agentTargetId : agent.providerId,
+    cliContract === "agent-id"
+      ? agent.agentTargetId
+      : (agent.wireProviderId ?? agent.providerId),
     ...(optionalString(input.cwd) ? ["--cwd", optionalString(input.cwd)!] : []),
     ...(optionalString(input.locale) ? ["--locale", optionalString(input.locale)!] : []),
     ...(optionalString(input.model) ? ["--model", optionalString(input.model)!] : []),
@@ -188,8 +209,10 @@ function resolveCatalogAgent(
   if (agentTargetId) {
     return catalog.agents.find((agent) => agent.agentTargetId === agentTargetId);
   }
-  const providerId = canonicalTuttiProviderId(input.providerId?.trim() ?? "");
-  const matches = catalog.agents.filter((agent) => agent.providerId === providerId);
+  const providerId = input.providerId?.trim() ?? "";
+  const matches = catalog.agents.filter(
+    (agent) => agent.providerId === providerId || agent.wireProviderId === providerId,
+  );
   if (matches.length > 1) {
     throw new TuttiIntegrationError(
       "agent_ambiguous",

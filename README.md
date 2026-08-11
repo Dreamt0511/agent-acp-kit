@@ -455,6 +455,13 @@ Exact availability results are cached per runtime scope;
 `runtime.detect({ refresh: true })` clears that cache and asks the daemon to
 refresh its short-lived, coalesced authentication probe.
 
+Tutti integration keeps three identities separate: `agentTargetId` is the
+exact selectable target, `providerId` is the canonical local runtime provider,
+and `wireProviderId` is the provider spelling exchanged with the daemon. For
+example, Kimi Code uses `extension:kimi-code`, `kimi`, and `acp:kimi-code`
+respectively. Runtime descriptor aliases perform this projection; old-daemon
+`--provider` fallback continues to send the original wire provider id.
+
 Provider behavior differs:
 
 - Codex: attempts dynamic discovery with `codex debug models`, then falls back to bundled or package model hints.

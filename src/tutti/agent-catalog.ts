@@ -33,27 +33,17 @@ export async function loadTuttiAgentCatalog(
     return await loadStandaloneAgentCatalog(input.runtime, input.detectContext);
   }
 
-  try {
-    const payload = await runTuttiCliJson({
-      ...input,
-      args: [
-        "--json",
-        "agent",
-        "list",
-        ...(input.agentTargetId ? ["--agent-id", input.agentTargetId] : []),
-        ...(input.refreshAvailability ? ["--refresh"] : []),
-      ],
-    });
-    return parseCliAgentCatalog(payload, input.runtime, input.detectContext, input.agentTargetId);
-  } catch (error) {
-    if (!isMissingAgentIdContract(error)) throw error;
-  }
-
-  const legacyPayload = await runTuttiCliJson({
+  const payload = await runTuttiCliJson({
     ...input,
-    args: ["--json", "agent", "providers"],
+    args: [
+      "--json",
+      "agent",
+      "list",
+      ...(input.agentTargetId ? ["--agent-id", input.agentTargetId] : []),
+      ...(input.refreshAvailability ? ["--refresh"] : []),
+    ],
   });
-  return parseLegacyProviderCatalog(legacyPayload, input.runtime, input.detectContext);
+  return parseCliAgentCatalog(payload, input.runtime, input.detectContext, input.agentTargetId);
 }
 
 export function parseTuttiAgentCatalog(
@@ -61,17 +51,6 @@ export function parseTuttiAgentCatalog(
   runtime: Pick<LocalAgentRuntime<string, string>, "listProviders">,
 ): TuttiAgentCatalog {
   return parseCliAgentCatalog(payload, runtime);
-}
-
-export function parseTuttiLegacyAgentProviderCatalog(
-  payload: unknown,
-  runtime: Pick<LocalAgentRuntime<string, string>, "listProviders">,
-): TuttiAgentCatalog {
-  return parseLegacyProviderCatalog(payload, runtime);
-}
-
-export function isMissingAgentIdContract(error: unknown) {
-  return error instanceof TuttiIntegrationError && error.code === "unsupported_command";
 }
 
 function parseCliAgentCatalog(
@@ -120,53 +99,15 @@ function parseCliAgentCatalog(
   ) {
     throw invalidCatalog("Tutti agent catalog defaultAgentTargetId is invalid.");
   }
-  return normalizedCatalog(
-    agents,
-    "tutti-cli",
-    "agent-id",
-    defaultPresent ? defaultAgentTargetId : undefined,
-  );
-}
-
-function parseLegacyProviderCatalog(
-  payload: unknown,
-  runtime: Pick<LocalAgentRuntime<string, string>, "listProviders">,
-  detectContext?: DetectContext,
-): TuttiAgentCatalog {
-  if (!isRecord(payload)) {
-    throw invalidCatalog("Tutti legacy provider catalog is not an object.");
+  if (requestedTarget) {
+    return {
+      schemaVersion: 1,
+      source: "tutti-cli",
+      defaultAgentTargetId,
+      agents,
+    };
   }
-  if (payload.schemaVersion !== 2) {
-    throw new TuttiIntegrationError(
-      "unsupported_schema",
-      "Tutti legacy provider catalog schema is unsupported.",
-      {
-        schemaVersion: typeof payload.schemaVersion === "number" ? payload.schemaVersion : -1,
-      },
-    );
-  }
-  if (!Array.isArray(payload.providers)) {
-    throw invalidCatalog("Tutti legacy provider catalog fields are invalid.");
-  }
-
-  const agents = withoutSharedAgents(
-    parseCatalogEntries({
-      values: payload.providers,
-      runtime,
-      detectContext,
-      agentTargetIdField: "agentTargetId",
-      providerIdField: "providerId",
-      displayNameField: "displayName",
-    }),
-  );
-  const requestedDefaultProvider = createTuttiProviderResolver(
-    runtime.listProviders().map((provider) => ({
-      id: String(provider.id),
-      ...(provider.aliases?.length ? { aliases: provider.aliases.map(String) } : {}),
-    })),
-  ).resolve(optionalString(payload.defaultProviderId) ?? "").runtimeProviderId;
-  const preferred = uniqueAgentForProvider(agents, requestedDefaultProvider);
-  return normalizedCatalog(agents, "tutti-cli", "provider-compat", preferred?.agentTargetId);
+  return normalizedCatalog(agents, "tutti-cli", defaultPresent ? defaultAgentTargetId : undefined);
 }
 
 function parseCatalogEntries(input: {
@@ -197,7 +138,7 @@ function parseCatalogEntries(input: {
       throw invalidCatalog(`Tutti agent catalog contains duplicate agent ${agentTargetId}.`);
     }
     seen.add(agentTargetId);
-    const { runtimeProviderId: providerId, wireProviderId } = resolver.resolve(
+    const providerId = resolver.resolve(
       requiredString(value[input.providerIdField], `agents[${index}].providerId`),
     );
     const runtimeRegistered = runtimeProviderIds.has(providerId);
@@ -214,7 +155,6 @@ function parseCatalogEntries(input: {
     return {
       agentTargetId,
       providerId,
-      wireProviderId,
       displayName: requiredString(value[input.displayNameField], `agents[${index}].displayName`),
       ...(executablePath ? { executablePath } : {}),
       availability,
@@ -238,13 +178,12 @@ async function loadStandaloneAgentCatalog(
     return {
       agentTargetId: `local:${providerId}`,
       providerId,
-      wireProviderId: providerId,
       displayName: descriptor.displayName,
       availability: standaloneAvailability(byProvider.get(providerId)),
       runtimeSupported,
     } satisfies TuttiAgentCatalogEntry;
   });
-  return normalizedCatalog(agents, "standalone", "agent-id");
+  return normalizedCatalog(agents, "standalone");
 }
 
 function withoutSharedAgents(agents: TuttiAgentCatalogEntry[]): TuttiAgentCatalogEntry[] {
@@ -258,7 +197,6 @@ function isSharedAgentTargetId(agentTargetId: string): boolean {
 function normalizedCatalog(
   agents: TuttiAgentCatalogEntry[],
   source: TuttiAgentCatalog["source"],
-  cliContract: TuttiAgentCatalog["cliContract"],
   preferredAgentTargetId?: string,
 ): TuttiAgentCatalog {
   const preferred = agents.find((agent) => agent.agentTargetId === preferredAgentTargetId);
@@ -270,15 +208,9 @@ function normalizedCatalog(
   return {
     schemaVersion: 1,
     source,
-    cliContract,
     defaultAgentTargetId: usableDefault?.agentTargetId ?? "",
     agents,
   };
-}
-
-function uniqueAgentForProvider(agents: TuttiAgentCatalogEntry[], providerId: string) {
-  const matches = agents.filter((agent) => agent.providerId === providerId);
-  return matches.length === 1 ? matches[0] : undefined;
 }
 
 function standaloneAvailability(

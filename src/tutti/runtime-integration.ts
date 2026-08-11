@@ -355,7 +355,7 @@ function descriptorForProvider<TKind extends string, TProvider extends string>(
       id: String(descriptor.id),
       ...(descriptor.aliases?.length ? { aliases: descriptor.aliases.map(String) } : {}),
     })),
-  ).resolve(providerId).runtimeProviderId;
+  ).resolve(providerId);
   return descriptors.find((descriptor) => String(descriptor.id) === runtimeProviderId);
 }
 

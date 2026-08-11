@@ -20,14 +20,10 @@ export interface TuttiAgentProviderCatalogEntry {
   runtimeSupported: boolean;
 }
 
-export type TuttiAgentCliContract = "agent-id" | "provider-compat";
-
 export interface TuttiAgentCatalogEntry {
   agentTargetId: string;
   /** Canonical provider id accepted by the local runtime. */
   providerId: string;
-  /** Exact provider id returned by or sent to the Tutti daemon. */
-  wireProviderId?: string;
   displayName: string;
   executablePath?: string;
   availability: TuttiAgentProviderAvailability;
@@ -37,7 +33,6 @@ export interface TuttiAgentCatalogEntry {
 export interface TuttiAgentCatalog {
   schemaVersion: 1;
   source: TuttiAgentIntegrationSource;
-  cliContract: TuttiAgentCliContract;
   defaultAgentTargetId: string;
   agents: TuttiAgentCatalogEntry[];
 }
@@ -82,7 +77,6 @@ export interface TuttiAgentComposerOptions {
   source: TuttiAgentIntegrationSource;
   agentTargetId: string;
   providerId: string;
-  wireProviderId?: string;
   effectiveSettings: Record<string, unknown>;
   modelConfig: TuttiAgentComposerConfig;
   permissionConfig: TuttiAgentPermissionConfig;
@@ -93,18 +87,13 @@ export interface TuttiAgentComposerOptions {
 export function isTuttiAgentCatalog(value: unknown): value is TuttiAgentCatalog {
   if (!isRecord(value) || value.schemaVersion !== 1) return false;
   if (value.source !== "tutti-cli" && value.source !== "standalone") return false;
-  if (value.cliContract !== "agent-id" && value.cliContract !== "provider-compat") {
-    return false;
-  }
   if (typeof value.defaultAgentTargetId !== "string" || !Array.isArray(value.agents)) {
     return false;
   }
   if (!value.agents.every(isAgentCatalogEntry)) return false;
   const agentTargetIds = value.agents.map((agent) => agent.agentTargetId);
   if (new Set(agentTargetIds).size !== agentTargetIds.length) return false;
-  return agentTargetIds.length === 0
-    ? value.defaultAgentTargetId === ""
-    : agentTargetIds.includes(value.defaultAgentTargetId);
+  return agentTargetIds.length > 0 || value.defaultAgentTargetId === "";
 }
 
 export function isTuttiAgentProviderCatalog(value: unknown): value is TuttiAgentProviderCatalog {
@@ -128,7 +117,6 @@ export function isTuttiAgentComposerOptions(value: unknown): value is TuttiAgent
     (value.source === "tutti-cli" || value.source === "standalone") &&
     isNonEmptyString(value.agentTargetId) &&
     typeof value.providerId === "string" &&
-    (value.wireProviderId === undefined || isNonEmptyString(value.wireProviderId)) &&
     isRecord(value.effectiveSettings) &&
     isComposerConfig(value.modelConfig) &&
     isPermissionConfig(value.permissionConfig) &&
@@ -142,7 +130,6 @@ function isAgentCatalogEntry(value: unknown) {
     isRecord(value) &&
     isNonEmptyString(value.agentTargetId) &&
     isCanonicalProviderId(value.providerId) &&
-    (value.wireProviderId === undefined || isNonEmptyString(value.wireProviderId)) &&
     isNonEmptyString(value.displayName) &&
     (value.executablePath === undefined || isNonEmptyString(value.executablePath)) &&
     typeof value.runtimeSupported === "boolean" &&

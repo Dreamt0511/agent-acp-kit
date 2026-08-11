@@ -15,11 +15,6 @@ export type TuttiProviderDescriptor = {
   aliases?: readonly string[];
 };
 
-export type TuttiProviderIdentity = {
-  wireProviderId: string;
-  runtimeProviderId: string;
-};
-
 /** Resolves daemon/CLI provider ids through the runtime's declared aliases. */
 export function createTuttiProviderResolver(
   descriptors: readonly TuttiProviderDescriptor[],
@@ -36,13 +31,12 @@ export function createTuttiProviderResolver(
   }
 
   return {
-    resolve(providerId: string): TuttiProviderIdentity {
-      const wireProviderId = providerId.trim();
-      return {
-        wireProviderId,
-        runtimeProviderId:
-          runtimeProviderByInput.get(wireProviderId) ?? canonicalTuttiProviderId(wireProviderId),
-      };
+    resolve(providerId: string): string {
+      const normalizedProviderId = providerId.trim();
+      return (
+        runtimeProviderByInput.get(normalizedProviderId) ??
+        canonicalTuttiProviderId(normalizedProviderId)
+      );
     },
   };
 }

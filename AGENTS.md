@@ -151,7 +151,7 @@ Tutti integration rules:
 - `loadTuttiAgentCatalog()` and exact `agentTargetId` values define app-facing selection. Runtime registration may disable an entry but may not add one omitted by the CLI.
 - Never collapse or deduplicate catalog entries by provider. Several exact agents may intentionally share one runtime provider.
 - Provider aliases are input-only runtime metadata. Public agent identity comes from the live catalog, and `nexight` must never alias `tutti-agent`.
-- Dual-stack fallback may use the old provider contract only when the CLI explicitly reports `agent list` as an unknown command and the old catalog proves one unambiguous exact target. Ordinary CLI failures must remain typed failures.
+- Configured Tutti CLI integrations require the exact-target contract. Always use `agent list` and `--agent-id`; never retry daemon commands with the legacy `agent providers` or `--provider` protocol.
 - App identity, daemon URL/token, CLI argv, schema validation, timeout, and cancellation do not belong in consumer apps.
 
 For release readiness, run:

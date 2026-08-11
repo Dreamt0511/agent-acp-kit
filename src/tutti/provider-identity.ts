@@ -1,8 +1,6 @@
 import { createDefaultLocalAgentProviderPlugins } from "../providers/acp-presets/provider.js";
-import {
-  createTuttiProviderResolver,
-  type TuttiProviderIdentity,
-} from "./internal.js";
+import type { LocalAgentRuntime } from "../runtime/create-runtime.js";
+import { createTuttiProviderResolver } from "./internal.js";
 
 // Tutti's server integration only normalizes providers registered by the
 // official default runtime. Unknown/third-party provider ids remain unchanged.
@@ -13,8 +11,14 @@ const officialProviderResolver = createTuttiProviderResolver(
   })),
 );
 
-export function resolveOfficialTuttiProvider(
-  providerId: string,
-): TuttiProviderIdentity {
-  return officialProviderResolver.resolve(providerId);
+export function createRuntimeTuttiProviderResolver(
+  runtime?: Pick<LocalAgentRuntime<string, string>, "listProviders">,
+) {
+  if (!runtime) return officialProviderResolver;
+  return createTuttiProviderResolver(
+    runtime.listProviders().map((provider) => ({
+      id: String(provider.id),
+      ...(provider.aliases?.length ? { aliases: provider.aliases.map(String) } : {}),
+    })),
+  );
 }

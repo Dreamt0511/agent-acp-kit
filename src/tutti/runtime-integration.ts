@@ -18,6 +18,7 @@ import {
   hasConfiguredTuttiCli,
   type TuttiCliJsonRunner,
 } from "./cli-json-runner.js";
+import { createTuttiProviderResolver } from "./internal.js";
 
 type IntegrationOptions = {
   runTuttiCli?: TuttiCliJsonRunner;
@@ -349,11 +350,13 @@ function descriptorForProvider<TKind extends string, TProvider extends string>(
   descriptors: RuntimeAgentDescriptor<TKind, TProvider>[],
   providerId: string,
 ) {
-  return descriptors.find(
-    (descriptor) =>
-      String(descriptor.id) === providerId ||
-      descriptor.aliases?.includes(providerId),
-  );
+  const runtimeProviderId = createTuttiProviderResolver(
+    descriptors.map((descriptor) => ({
+      id: String(descriptor.id),
+      ...(descriptor.aliases?.length ? { aliases: descriptor.aliases.map(String) } : {}),
+    })),
+  ).resolve(providerId);
+  return descriptors.find((descriptor) => String(descriptor.id) === runtimeProviderId);
 }
 
 function projectAvailableTarget<TKind extends string, TProvider extends string>(

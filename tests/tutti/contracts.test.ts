@@ -23,7 +23,6 @@ describe("Tutti browser-safe contracts", () => {
     const value = {
       schemaVersion: 1,
       source: "tutti-cli",
-      cliContract: "agent-id",
       defaultAgentTargetId: "team:codex-one",
       agents: [
         {
@@ -57,6 +56,24 @@ describe("Tutti browser-safe contracts", () => {
         agents: [value.agents[0], value.agents[0]],
       }),
     ).toBe(false);
+  });
+
+  it("accepts a filtered catalog whose global default is outside the result", () => {
+    const value = {
+      schemaVersion: 1,
+      source: "tutti-cli",
+      defaultAgentTargetId: "local:codex",
+      agents: [
+        {
+          agentTargetId: "extension:hermes",
+          providerId: "hermes",
+          displayName: "Hermes",
+          availability: { status: "available", reasonCode: "", detail: "" },
+          runtimeSupported: true,
+        },
+      ],
+    };
+    expect(isTuttiAgentCatalog(value)).toBe(true);
   });
 
   it("accepts a catalog whose default resolves to one unique provider", () => {

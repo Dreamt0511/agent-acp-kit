@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 
 import type { LocalAgentRuntime } from "../../src/runtime/create-runtime.js";
-import { loadTuttiAgentComposerOptions, TuttiIntegrationError } from "../../src/tutti/index.js";
+import {
+  loadTuttiAgentComposerOptions,
+  parseTuttiAgentComposerOptions,
+  TuttiIntegrationError,
+} from "../../src/tutti/index.js";
 
 function runtime(): LocalAgentRuntime<string, string> {
   return {
@@ -66,6 +70,66 @@ const cliComposer = {
 };
 
 describe("Tutti composer options", () => {
+  it("accepts another official alias for the same runtime provider", () => {
+    expect(
+      parseTuttiAgentComposerOptions(
+        {
+          ...cliComposer,
+          agentTargetId: "extension:kimi-code",
+          provider: "kimi-code",
+        },
+        {
+          agentTargetId: "extension:kimi-code",
+          providerId: "kimi",
+        },
+      ),
+    ).toMatchObject({
+      agentTargetId: "extension:kimi-code",
+      providerId: "kimi",
+    });
+  });
+
+  it("uses caller runtime aliases consistently for catalog and composer responses", async () => {
+    const customRuntime = {
+      ...runtime(),
+      listProviders: () => [
+        {
+          id: "custom",
+          aliases: ["acp:custom"],
+          displayName: "Custom",
+          kind: "local-agent",
+        },
+      ],
+    } satisfies LocalAgentRuntime<string, string>;
+    const options = await loadTuttiAgentComposerOptions({
+      runtime: customRuntime,
+      agentTargetId: "extension:custom",
+      runTuttiCli: async (args) =>
+        args.includes("list")
+          ? {
+              schemaVersion: 1,
+              defaultAgentTargetId: "local:codex",
+              agents: [
+                {
+                  id: "extension:custom",
+                  name: "Custom",
+                  provider: "acp:custom",
+                  availability: { status: "available", reasonCode: "", detail: "" },
+                },
+              ],
+            }
+          : {
+              ...cliComposer,
+              agentTargetId: "extension:custom",
+              provider: "acp:custom",
+            },
+    });
+    expect(options).toMatchObject({
+      agentTargetId: "extension:custom",
+      providerId: "custom",
+    });
+  });
+
   it("loads options by exact agent id on the new contract", async () => {
     const calls: string[][] = [];
     const timeouts: number[] = [];
@@ -93,90 +157,21 @@ describe("Tutti composer options", () => {
     expect(timeouts).toEqual([60_000, 45_000]);
   });
 
-  it("uses the old provider selector after legacy catalog negotiation", async () => {
-    const calls: string[][] = [];
-    const options = await loadTuttiAgentComposerOptions({
-      runtime: runtime(),
-      agentTargetId: "local:codex",
-      runTuttiCli: async (args) => {
-        calls.push(args);
-        if (args.includes("list")) {
-          throw new TuttiIntegrationError("unsupported_command", "unknown command");
-        }
-        if (args.includes("providers")) {
-          return {
-            schemaVersion: 2,
-            defaultProviderId: "codex",
-            providers: [
-              {
-                providerId: "codex",
-                displayName: "Codex",
-                agentTargetId: "local:codex",
-                availability: {
-                  status: "available",
-                  reasonCode: "",
-                  detail: "",
-                },
-              },
-            ],
-          };
-        }
-        return {
-          ...cliComposer,
-          schemaVersion: 1,
-          agentTargetId: undefined,
-        };
-      },
-    });
-    expect(calls.at(-1)).toEqual(["--json", "agent", "composer-options", "--provider", "codex"]);
-    expect(options).toMatchObject({
-      schemaVersion: 2,
-      agentTargetId: "local:codex",
-      providerId: "codex",
-    });
-  });
-
-  it("rejects shared providers on the old daemon before composer execution", async () => {
+  it("does not retry with the old provider selector", async () => {
     const calls: string[][] = [];
     await expect(
       loadTuttiAgentComposerOptions({
         runtime: runtime(),
-        agentTargetId: "team:codex-one",
+        agentTargetId: "local:codex",
         runTuttiCli: async (args) => {
           calls.push(args);
-          if (args.includes("list")) {
-            throw new TuttiIntegrationError("unsupported_command", "unknown command");
-          }
-          return {
-            schemaVersion: 2,
-            defaultProviderId: "codex",
-            providers: [
-              {
-                providerId: "codex",
-                displayName: "Codex One",
-                agentTargetId: "team:codex-one",
-                availability: {
-                  status: "available",
-                  reasonCode: "",
-                  detail: "",
-                },
-              },
-              {
-                providerId: "codex",
-                displayName: "Codex Two",
-                agentTargetId: "team:codex-two",
-                availability: {
-                  status: "available",
-                  reasonCode: "",
-                  detail: "",
-                },
-              },
-            ],
-          };
+          throw new TuttiIntegrationError("unsupported_command", "unknown command");
         },
       }),
-    ).rejects.toMatchObject({ code: "agent_ambiguous" });
-    expect(calls.some((args) => args.includes("composer-options"))).toBe(false);
+    ).rejects.toMatchObject({ code: "unsupported_command" });
+    expect(calls).toEqual([
+      ["--json", "agent", "list", "--agent-id", "local:codex"],
+    ]);
   });
 
   it("preserves a caller-provided timeout for catalog and composer", async () => {

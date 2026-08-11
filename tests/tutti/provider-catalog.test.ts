@@ -11,6 +11,7 @@ function fakeRuntime(
   input: {
     providers?: Array<{
       id: string;
+      aliases?: readonly string[];
       displayName: string;
       kind: string;
       requiresKnownAuth?: boolean;
@@ -89,7 +90,6 @@ describe("Tutti agent catalog", () => {
     expect(catalog).toMatchObject({
       schemaVersion: 1,
       source: "tutti-cli",
-      cliContract: "agent-id",
       defaultAgentTargetId: "local:codex",
     });
     expect(catalog.agents.map((agent) => agent.agentTargetId)).toEqual([
@@ -106,6 +106,39 @@ describe("Tutti agent catalog", () => {
     });
     expect(catalog.agents[1]?.executablePath).toBe("/resolved/bin/codex");
     expect(catalog.agents.some((agent) => agent.providerId === "claude-code")).toBe(false);
+  });
+
+  it("projects extension wire providers onto canonical runtime providers", async () => {
+    const catalog = await loadTuttiAgentCatalog({
+      runtime: fakeRuntime({
+        providers: [
+          {
+            id: "kimi",
+            aliases: ["kimi-code", "acp:kimi-code"],
+            displayName: "Kimi Code",
+            kind: "local-agent",
+          },
+        ],
+      }),
+      runTuttiCli: async () => ({
+        schemaVersion: 1,
+        defaultAgentTargetId: "extension:kimi-code",
+        agents: [
+          {
+            id: "extension:kimi-code",
+            name: "Kimi Code",
+            provider: "acp:kimi-code",
+            availability: { status: "available", reasonCode: "", detail: "" },
+          },
+        ],
+      }),
+    });
+
+    expect(catalog.agents[0]).toMatchObject({
+      agentTargetId: "extension:kimi-code",
+      providerId: "kimi",
+      runtimeSupported: true,
+    });
   });
 
   it("preserves the daemon default instead of guessing from availability or order", async () => {
@@ -172,76 +205,41 @@ describe("Tutti agent catalog", () => {
     expect(catalog.defaultAgentTargetId).toBe("local:codex");
   });
 
-  it("falls back to the old provider contract without inventing target ids", async () => {
+  it("does not fall back when the daemon lacks the exact-agent contract", async () => {
     const calls: string[][] = [];
-    const catalog = await loadTuttiAgentCatalog({
-      runtime: fakeRuntime(),
-      runTuttiCli: async (args) => {
-        calls.push(args);
-        if (args.includes("list")) {
-          throw new TuttiIntegrationError("unsupported_command", "unknown command");
-        }
-        return {
-          schemaVersion: 2,
-          defaultProviderId: "claude",
-          providers: [
-            {
-              providerId: "claude",
-              displayName: "Claude Code",
-              agentTargetId: "local:claude-code",
-              availability: {
-                status: "available",
-                reasonCode: "",
-                detail: "",
-              },
-            },
-          ],
-        };
-      },
-    });
-    expect(calls).toEqual([
-      ["--json", "agent", "list"],
-      ["--json", "agent", "providers"],
-    ]);
-    expect(catalog).toMatchObject({
-      cliContract: "provider-compat",
-      defaultAgentTargetId: "local:claude-code",
-      agents: [
-        {
-          agentTargetId: "local:claude-code",
-          providerId: "claude-code",
-          runtimeSupported: true,
-        },
-      ],
-    });
-  });
-
-  it("rejects a legacy catalog that omits exact target identity", async () => {
     await expect(
       loadTuttiAgentCatalog({
         runtime: fakeRuntime(),
         runTuttiCli: async (args) => {
-          if (args.includes("list")) {
-            throw new TuttiIntegrationError("unsupported_command", "unknown command");
-          }
-          return {
-            schemaVersion: 2,
-            defaultProviderId: "codex",
-            providers: [
-              {
-                providerId: "codex",
-                displayName: "Codex",
-                availability: {
-                  status: "available",
-                  reasonCode: "",
-                  detail: "",
-                },
-              },
-            ],
-          };
+          calls.push(args);
+          throw new TuttiIntegrationError("unsupported_command", "unknown command");
         },
       }),
-    ).rejects.toMatchObject({ code: "invalid_response" });
+    ).rejects.toMatchObject({ code: "unsupported_command" });
+    expect(calls).toEqual([["--json", "agent", "list"]]);
+  });
+
+  it("preserves the global default when an exact filtered result omits it", async () => {
+    const catalog = await loadTuttiAgentCatalog({
+      runtime: fakeRuntime(),
+      agentTargetId: "extension:hermes",
+      runTuttiCli: async () => ({
+        schemaVersion: 1,
+        defaultAgentTargetId: "local:codex",
+        agents: [
+          {
+            id: "extension:hermes",
+            name: "Hermes",
+            provider: "codex",
+            availability: { status: "available", reasonCode: "", detail: "" },
+          },
+        ],
+      }),
+    });
+    expect(catalog.defaultAgentTargetId).toBe("local:codex");
+    expect(catalog.agents.map((agent) => agent.agentTargetId)).toEqual([
+      "extension:hermes",
+    ]);
   });
 
   it("automatically creates stable standalone agent ids", async () => {
@@ -302,7 +300,7 @@ describe("Tutti agent catalog", () => {
     expect(catalog.defaultAgentTargetId).toBe("local:codex");
   });
 
-  it("does not silently use standalone discovery after both CLI contracts fail", async () => {
+  it("does not silently use standalone discovery after a configured CLI failure", async () => {
     const runtime = fakeRuntime();
     const detect = vi.spyOn(runtime, "detect");
     await expect(
@@ -319,7 +317,7 @@ describe("Tutti agent catalog", () => {
     expect(detect).not.toHaveBeenCalled();
   });
 
-  it("does not hide malformed new-contract responses behind legacy fallback", async () => {
+  it("reports malformed exact-target responses directly", async () => {
     const calls: string[][] = [];
     await expect(
       loadTuttiAgentCatalog({

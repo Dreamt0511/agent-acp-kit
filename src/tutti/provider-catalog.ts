@@ -1,7 +1,7 @@
 import type { LocalAgentRuntime } from "../runtime/create-runtime.js";
 import {
   loadTuttiAgentCatalog,
-  parseTuttiLegacyAgentProviderCatalog,
+  parseTuttiAgentCatalog,
   type LoadTuttiAgentCatalogInput,
 } from "./agent-catalog.js";
 import type {
@@ -23,12 +23,12 @@ export async function loadTuttiAgentProviderCatalog(
   return projectLegacyProviderCatalog(await loadTuttiAgentCatalog(input));
 }
 
-/** @deprecated Use parseTuttiAgentCatalog or parseTuttiLegacyAgentProviderCatalog. */
+/** @deprecated Use parseTuttiAgentCatalog. */
 export function parseTuttiAgentProviderCatalog(
   payload: unknown,
   runtime: Pick<LocalAgentRuntime<string, string>, "listProviders">,
 ): TuttiAgentProviderCatalog {
-  return projectLegacyProviderCatalog(parseTuttiLegacyAgentProviderCatalog(payload, runtime));
+  return projectLegacyProviderCatalog(parseTuttiAgentCatalog(payload, runtime));
 }
 
 function projectLegacyProviderCatalog(catalog: TuttiAgentCatalog): TuttiAgentProviderCatalog {

@@ -205,7 +205,7 @@ describe("runTuttiCliJson", () => {
     });
   });
 
-  it("classifies only the exact missing agent-list command as protocol fallback", async () => {
+  it("classifies only the exact missing agent-list command as unsupported", async () => {
     const unsupported = await executable(
       `process.stderr.write("unknown command: agent list\\n"); process.exit(2);`,
     );

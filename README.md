@@ -203,7 +203,7 @@ defaults internally before launching the app-owned local Provider process. When
 the Tutti catalog provides an exact `executablePath`, the integration carries it
 through `AgentRunInput` to the selected Provider launch plan. This avoids asking
 an app process to rediscover a configured Agent CLI from its inherited `PATH`;
-older catalogs and standalone hosts continue to use provider-native discovery.
+catalog entries without that field and standalone hosts continue to use provider-native discovery.
 On Windows, process launch resolves native executables, npm/node shims, and
 PowerShell `-File` shims without routing Agent arguments through `cmd.exe`;
 unknown batch programs fail closed.
@@ -220,12 +220,11 @@ below.
 as low-level compatibility APIs, but Workspace Apps should not compose them
 themselves.
 
-The integration negotiates both daemon generations during rollout. It prefers
-the agent-ID contract and falls back to the old provider contract only when the
-CLI reports that `agent list` is unsupported. The kit resolves provider runtime
-metadata internally from the selected target. Legacy fallback requires an exact
-target ID from the old catalog and fails closed when multiple targets share a
-provider; ordinary CLI failures never trigger fallback.
+Configured Tutti CLI integrations require the exact-target daemon contract.
+Catalog, composer, and skill commands use `agentTargetId`/`--agent-id`; the SDK
+does not retry with the legacy `agent providers` or `--provider` protocol.
+Deprecated provider-only SDK inputs are resolved through the current agent
+catalog and are accepted only when exactly one target matches.
 
 Apps that wrap a Provider plugin can preserve that customization:
 
@@ -455,6 +454,12 @@ Exact availability results are cached per runtime scope;
 `runtime.detect({ refresh: true })` clears that cache and asks the daemon to
 refresh its short-lived, coalesced authentication probe.
 
+Tutti integration keeps two identities separate: `agentTargetId` is the exact
+selectable target and `providerId` is the canonical local runtime provider. For
+example, Kimi Code uses `extension:kimi-code` and `kimi`. Daemon provider
+spellings such as `acp:kimi-code` are normalized through runtime descriptor
+aliases and are not exposed as another public identity.
+
 Provider behavior differs:
 
 - Codex: attempts dynamic discovery with `codex debug models`, then falls back to bundled or package model hints.
@@ -634,7 +639,7 @@ decide how to merge Tutti's recommended system prompt with the app-owned prompt:
 import { loadTuttiAgentSkillContext } from "@tutti-os/agent-acp-kit/tutti";
 
 const tuttiContext = await loadTuttiAgentSkillContext({
-  provider,
+  agentTargetId,
   agentSessionId: runId,
   cwd,
   commandEnvNames: ["MY_APP_TUTTI_CLI"],
